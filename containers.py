@@ -2,10 +2,14 @@
 """
 import glob
 import os
+import shutil
+import socket
 import time
+from contextlib import closing
 from dataclasses import dataclass, field
 
 import docker
+import requests
 import yaml
 
 
@@ -16,46 +20,45 @@ class Container:
     originator: str  # The email of whoever spun it up
     game: str  # The id of the game running in the container
     container: docker.models.containers.Container  # The container object
+    port: int  # The port the game is running on
     start_time: float = field(
         default_factory=time.time
     )  # When the container was started
-    stdins: list[tuple[int, str]] = field(
-        default_factory=list
-    )  # A list of stdin events
 
     @classmethod
     def start(cls, game, author, client):
         """Starts a container for a game."""
+        with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+            import shutil
+
+            s.bind(("", 0))
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            port = s.getsockname()[1]
         container = client.containers.run(
             game,
             detach=True,
-            mem_limit="16m",
-            stdin_open=True,
+            ports={"8080/tcp": port},
         )
-        return cls(author, game, container)
+        return cls(author, game, container, port)
 
-    def send_stdin(self, text):
-        """Sends text to the container's stdin."""
-        self.stdins.append((len(self.output()), text))
-
-        socket = self.container.attach_socket(params={"stdin": 1, "stream": 1})
-        socket._sock.send(text.encode("utf-8"))
-        socket.close()
+    def output(self):
+        """Returns the output of the game."""
+        return requests.get(f"http://localhost:{self.port}/output").json()
 
     def kill(self):
         """Kills the container."""
         self.container.kill()
 
     def logs(self):
-        """Returns the logs of the container."""
+        """Returns the logs of the server."""
         return self.container.logs().decode("utf-8")
 
-    def output(self):
-        """Returns the output of the container."""
-        text = self.logs()
-        for stdin in self.stdins:
-            text = text[: stdin[0]] + stdin[1] + text[stdin[0] :]
-        return text
+    def stdin(self, text):
+        """Sends text to the stdin of the game."""
+        return requests.post(
+            f"http://localhost:{self.port}/stdin",
+            data=text,
+        ).json()
 
 
 class Manager:
@@ -88,15 +91,48 @@ class Manager:
                     self.paths.append(folder)
                     self.names.append(game)
 
-                    self.create_dockerfile_for(folder, data)
-                    self.client.images.build(path=folder, tag=game)
+                    self.create_docker_context_for(folder, data)
                 except yaml.YAMLError as exc:
                     print(exc)
+
+    def create_docker_context_for(self, folder, game):
+        """Creates a Docker context for a game."""
+        self.create_dockerfile_for(folder, game)
+        shutil.copyfile(
+            "requirements_server.txt", os.path.join(folder, "requirements.txt")
+        )
+        shutil.copyfile("serve.py", os.path.join(folder, "serve.py"))
+        self.client.images.build(path=folder, tag=game)
 
     def create_dockerfile_for(self, folder, game):
         """Creates a Dockerfile for a game."""
         with open(os.path.join(folder, "Dockerfile"), "w", encoding="utf-8") as file:
             file.write("""FROM python:3.10-slim\n""")
             file.write("""WORKDIR /usr/src/app\n""")
+            file.write("""COPY requirements.txt ./requirements.txt\n""")
+            file.write("""RUN pip install --no-cache-dir -r requirements.txt\n""")
+            file.write("""RUN rm requirements.txt\n""")
+            file.write("""COPY serve.py .\n""")
+            file.write("""EXPOSE 8080\n""")
             file.write(f"""COPY {game["file"]} .\n""")
-            file.write(f"""CMD ["python", "-u", "{game["file"]}"]\n""")
+            file.write(f"""CMD ["python", "serve.py", "python", "{game["file"]}"]\n""")
+
+    def start(self, game, author):
+        """Starts a game."""
+        container = Container.start(game, author, self.client)
+        self.containers.append(container)
+        return container
+
+    def stdin(self, originator, game_name, text):
+        """Sends text to the stdin of a game."""
+        for container in self.containers:
+            if container.originator == originator and container.game == game_name:
+                return container.stdin(text)
+        raise ValueError("No such game")
+
+    def output(self, originator, game_name):
+        """Returns the output of a game."""
+        for container in self.containers:
+            if container.originator == originator and container.game == game_name:
+                return container.output()
+        raise ValueError("No such game")
