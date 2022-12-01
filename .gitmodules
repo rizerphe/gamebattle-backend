@@ -1,0 +1,3 @@
+[submodule "games"]
+	path = games
+	url = git@github.com:rizerphe/gamebattle.git
