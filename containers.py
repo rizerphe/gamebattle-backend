@@ -136,3 +136,11 @@ class Manager:
             if container.originator == originator and container.game == game_name:
                 return container.output()
         raise ValueError("No such game")
+
+    def user_games(self, originator):
+        """Returns the games a user has running."""
+        return [
+            container.game
+            for container in self.containers
+            if container.originator == originator
+        ]

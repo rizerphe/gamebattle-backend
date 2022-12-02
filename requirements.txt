@@ -1,2 +1,5 @@
 docker
 pyyaml
+flask
+flask-restful
+flask-cors
