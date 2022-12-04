@@ -26,12 +26,15 @@ def stdin():
 
 @app.route("/output")
 def output():
-    global OUTPUT
-    if p.poll(0):
-        out = os.read(fd, 1024)
-        OUTPUT += out.decode()
-        return {"output": out.decode(), "done": False, "whole": OUTPUT}
-    return {"output": "", "done": False, "whole": OUTPUT}
+    try:
+        global OUTPUT
+        if p.poll(0):
+            out = os.read(fd, 1024)
+            OUTPUT += out.decode()
+            return {"output": out.decode(), "done": False, "whole": OUTPUT}
+        return {"output": "", "done": False, "whole": OUTPUT}
+    except OSError:
+        return {"output": "", "done": True, "whole": OUTPUT}
 
 
 if __name__ == "__main__":
