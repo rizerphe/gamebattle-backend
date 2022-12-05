@@ -41,7 +41,12 @@ class Sessions(flask_restful.Resource):
 
     def post(self):
         id_token = flask.request.json["token"]
-        user = self.auth.verify(id_token)
+        try:
+            user = self.auth.verify(id_token)
+        except ValueError as e:
+            return {"error": str(e)}, 401
+        if user is None:
+            return {"error": "invalid token"}, 401
         return {"session": self.auth_manager.create_session(user), "user": user}
 
 
