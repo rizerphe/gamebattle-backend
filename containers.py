@@ -34,8 +34,6 @@ class Container:
     def start(cls, game, author, data, client):
         """Starts a container for a game."""
         with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
-            import shutil
-
             s.bind(("", 0))
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             port = s.getsockname()[1]
