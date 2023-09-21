@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager, closing
 from dataclasses import dataclass, field
+import ipaddress
 import socket
 import time
 
@@ -31,8 +32,19 @@ class Container:
     """A class containing all the info about a container"""
 
     container: docker.models.containers.Container
-    port: int
+    port: int | None = None
     start_time: float = field(default_factory=time.time)
+    network: str | None = None
+
+    @property
+    def net_addr(self) -> str:
+        """Own IP address and port, taking into account the docker network"""
+        if self.network is None:
+            return f"localhost:{self.port}"
+        network = self.container.client.networks.get(self.network)
+        net_address = network.attrs["Containers"][self.container.id]["IPv4Address"]
+        ip = ipaddress.ip_interface(net_address).ip
+        return f"{ip}:{self.port or 8080}"
 
     @property
     def logs(self) -> str:
@@ -52,6 +64,7 @@ class Container:
         cls,
         game: str,
         client: docker.DockerClient,
+        network: str | None = None,
         resource_limits: Limits | None = None,
     ) -> Container:
         """Starts a container for a game.
@@ -59,6 +72,7 @@ class Container:
         Args:
             game (str): The name of the game
             client (docker.DockerClient): The docker client
+            network (str | None): The name of the network to use
             resource_limits (Limits): The resource limits for the container
 
         Returns:
@@ -66,15 +80,26 @@ class Container:
         """
         resource_limits = resource_limits or Limits.default()
         port = cls.pick_port()
-        container = client.containers.run(
-            game,
-            detach=True,
-            ports={"8080/tcp": port},
-            cpu_period=50000,
-            cpu_quota=int(50000 * resource_limits.cpu_fraction),
-            mem_limit=f"{resource_limits.memory_mb}m",
+        container = (
+            client.containers.run(
+                game,
+                detach=True,
+                network=network,
+                cpu_period=50000,
+                cpu_quota=int(50000 * resource_limits.cpu_fraction),
+                mem_limit=f"{resource_limits.memory_mb}m",
+            )
+            if network
+            else client.containers.run(
+                game,
+                detach=True,
+                ports={"8080/tcp": port},
+                cpu_period=50000,
+                cpu_quota=int(50000 * resource_limits.cpu_fraction),
+                mem_limit=f"{resource_limits.memory_mb}m",
+            )
         )
-        return cls(container, port)
+        return cls(container, 8080 if network else port, network=network)
 
     def restart(self) -> None:
         """Restart the container."""
@@ -84,7 +109,7 @@ class Container:
         """Retrieve the output of the game."""
         try:
             return GameOutput(
-                **requests.get(f"http://localhost:{self.port}/output", timeout=1).json()
+                **requests.get(f"http://{self.net_addr}/output", timeout=1).json()
             )
         except requests.exceptions.ConnectionError:
             return GameOutput(
@@ -108,7 +133,7 @@ class Container:
         """
         return Status(
             **requests.post(
-                f"http://localhost:{self.port}/stdin",
+                f"http://{self.net_addr}/stdin",
                 json=text,
                 timeout=1,
             ).json()
@@ -124,7 +149,7 @@ class Container:
         # We do a couple retries because the server inside the container
         # might not be ready yet.
         try:
-            async with websockets.connect(f"ws://localhost:{self.port}/ws") as ws:
+            async with websockets.connect(f"ws://{self.net_addr}/ws") as ws:
                 yield ws
         except websockets.exceptions.InvalidMessage:
             if retries > 0:

@@ -22,16 +22,19 @@ class Game:
     container: Container
 
     @classmethod
-    def start(cls, meta: GameMeta, client: DockerClient) -> Game:
+    def start(
+        cls, meta: GameMeta, client: DockerClient, network: str | None = None
+    ) -> Game:
         """Start a game.
 
         Args:
             meta (GameMeta): The metadata of the game
             client (DockerClient): The docker client to use
+            network (str | None): The name of the network to use.
         """
         return Game(
             metadata=meta,
-            container=Container.start(meta.container_name, client),
+            container=Container.start(meta.container_name, client, network),
         )
 
     def restart(self) -> None:

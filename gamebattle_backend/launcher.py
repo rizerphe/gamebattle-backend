@@ -15,7 +15,11 @@ class Launcher:
     """A launcher for game containers."""
 
     def __init__(
-        self, games_path: str, requirements_path: str, server_path: str
+        self,
+        games_path: str,
+        requirements_path: str,
+        server_path: str,
+        network: str | None = None,
     ) -> None:
         """Initialize the manager.
 
@@ -23,11 +27,13 @@ class Launcher:
             games_path (str): The path to the games folder
             requirements_path (str): The path to the server requirements file
             server_path (str): The path to the server python executable
+            network (str | None): The name of the network to use.
         """
         self.client = docker.from_env()
         self.games_path = games_path
         self.requirements_path = requirements_path
         self.server_path = server_path
+        self.network = network
 
         self.games = self.scan_games()
 
@@ -89,4 +95,4 @@ class Launcher:
         Returns:
             Game: The started game
         """
-        return Game.start(meta, self.client)
+        return Game.start(meta, self.client, self.network)
