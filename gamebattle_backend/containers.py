@@ -151,7 +151,7 @@ class Container:
         try:
             async with websockets.connect(f"ws://{self.net_addr}/ws") as ws:
                 yield ws
-        except websockets.exceptions.InvalidMessage:
+        except (websockets.exceptions.InvalidMessage, OSError):
             if retries > 0:
                 await asyncio.sleep(1)
                 async with self.ws(retries - 1) as ws:
