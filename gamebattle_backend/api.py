@@ -10,7 +10,7 @@ import websockets
 
 from .auth import verify
 from .common import GameOutput
-from .launcher import Prelauncher
+from .launcher import Prelauncher, launch_preloaded
 from .manager import Manager, TooManySessionsError
 from .session import SessionPublic
 
@@ -61,7 +61,9 @@ class GamebattleApi:
             games_path: The path to the games directory.
             network: The docker network to use
         """
-        self.manager = Manager(Prelauncher(games_path, network))
+        self.manager = Manager(
+            Prelauncher(games_path, network), launch_strategy=launch_preloaded
+        )
 
     def sessions(
         self, owner: str = fastapi.Depends(firebase_email)
