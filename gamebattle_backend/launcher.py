@@ -2,13 +2,51 @@
 from __future__ import annotations
 import glob
 import os
-import shutil
+import random
+from typing import TYPE_CHECKING
 
 import docker
 import yaml
 
 from .common import GameMeta
 from .game import Game
+
+if TYPE_CHECKING:
+    from .session import LaunchStrategy
+
+
+def launch_randomly(launcher: Launcher, capacity: int, owner: str) -> list[GameMeta]:
+    """Pick N games to launch.
+
+    Args:
+        launcher (Launcher): The launcher to use
+        capacity (int): The number of games to launch
+        owner (str): The owner of the session
+    """
+    return random.sample(
+        [game for game in launcher.games if game.author != owner], capacity
+    )
+
+
+def launch_preloaded(
+    launcher: Prelauncher, capacity: int, owner: str
+) -> list[GameMeta]:
+    """Pick N games to launch, preferring prelaunched games.
+
+    Args:
+        launcher (Prelauncher): The launcher to use
+        capacity (int): The number of games to launch
+        owner (str): The owner of the session
+    """
+    available = [game for game in launcher.prelaunched if game.author != owner]
+    if len(available) < capacity:
+        available.extend(
+            random.sample(
+                [game for game in launcher.games if game.author != owner],
+                capacity - len(available),
+            )
+        )
+    return random.sample(available, capacity)
 
 
 class Launcher:
@@ -77,3 +115,51 @@ class Launcher:
             Game: The started game
         """
         return Game.start(meta, self.client, self.network)
+
+
+class Prelauncher(Launcher):
+    """A launcher for game containers that keeps a couple running just in case"""
+
+    def __init__(
+        self,
+        games_path: str,
+        network: str | None = None,
+        prelaunch: int = 3,
+        prelaunch_strategy: LaunchStrategy = launch_randomly,
+    ) -> None:
+        """Initialize the manager.
+
+        Args:
+            games_path (str): The path to the games folder
+            network (str | None): The name of the network to use.
+            prelaunch (int): The number of games to keep running
+        """
+        super().__init__(games_path, network)
+        self.prelaunch = prelaunch
+        self.prelaunched: dict[GameMeta, list[Game]] = {}
+        self.prelaunch_strategy = prelaunch_strategy
+        self.prelaunch_games()
+
+    def prelaunch_games(self) -> None:
+        """Prelaunches games."""
+        for _ in range(len(self.prelaunched), self.prelaunch):
+            meta = random.choice(self.games)
+            game = super().start_game(meta)
+            self.prelaunched.setdefault(meta, []).append(game)
+
+    def start_game(self, meta: GameMeta) -> Game:
+        """Start a game.
+
+        Args:
+            meta (GameMeta): The metadata of the game
+
+        Returns:
+            Game: The started game
+        """
+        game = (
+            self.prelaunched[meta].pop()
+            if meta in self.prelaunched and self.prelaunched[meta]
+            else super().start_game(meta)
+        )
+        self.prelaunch_games()
+        return game

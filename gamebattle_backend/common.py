@@ -37,7 +37,7 @@ class Status:
     status: RequestStatus
 
 
-@dataclass
+@dataclass(frozen=True)
 class GameMeta:
     """The metadata of a game."""
 

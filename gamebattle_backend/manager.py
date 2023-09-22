@@ -8,7 +8,7 @@ import uuid
 
 import websockets
 
-from .session import Session
+from .session import LaunchStrategy, Session, launch_randomly
 
 if TYPE_CHECKING:
     from .launcher import Launcher
@@ -38,7 +38,12 @@ class TooManySessionsError(SessionManagerError):
 class Manager:
     """A session manager."""
 
-    def __init__(self, launcher: Launcher, config: Config | None = None) -> None:
+    def __init__(
+        self,
+        launcher: Launcher,
+        config: Config | None = None,
+        launch_strategy: LaunchStrategy = launch_randomly,
+    ) -> None:
         """Initialize the manager.
 
         Args:
@@ -47,6 +52,7 @@ class Manager:
         """
         self.sessions: dict[uuid.UUID, Session] = {}
         self.launcher = launcher
+        self.launch_strategy = launch_strategy
         self.config = config or Config.default()
         self.lock = RLock()
 
@@ -75,7 +81,7 @@ class Manager:
         with self.lock:
             if len(self.user_sessions(owner)) >= self.config.max_sessions_per_user:
                 raise TooManySessionsError
-            session = Session.launch(owner, self.launcher)
+            session = Session.launch(owner, self.launcher, self.launch_strategy)
             id_ = uuid.uuid4()
             self.sessions[id_] = session
             return id_, session
@@ -86,6 +92,9 @@ class Manager:
         Args:
             session_id: The session ID.
             owner: The user ID of the session owner.
+
+        Raises:
+            KeyError: If the session does not exist.
         """
         with self.lock:
             session = self.sessions[session_id]
