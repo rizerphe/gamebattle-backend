@@ -36,6 +36,10 @@ class Container:
     start_time: float = field(default_factory=time.time)
     network: str | None = None
 
+    def __del__(self) -> None:
+        """Kill the container when the object is deleted."""
+        self.kill()
+
     @property
     def net_addr(self) -> str:
         """Own IP address and port, taking into account the docker network"""
