@@ -17,22 +17,16 @@ class Launcher:
     def __init__(
         self,
         games_path: str,
-        requirements_path: str,
-        server_path: str,
         network: str | None = None,
     ) -> None:
         """Initialize the manager.
 
         Args:
             games_path (str): The path to the games folder
-            requirements_path (str): The path to the server requirements file
-            server_path (str): The path to the server python executable
             network (str | None): The name of the network to use.
         """
         self.client = docker.from_env()
         self.games_path = games_path
-        self.requirements_path = requirements_path
-        self.server_path = server_path
         self.network = network
 
         self.games = self.scan_games()
@@ -59,10 +53,6 @@ class Launcher:
             game (GameMeta): The metadata of the game
         """
         self.create_dockerfile_for(folder, game)
-        shutil.copyfile(
-            self.requirements_path, os.path.join(folder, "requirements.txt")
-        )
-        shutil.copyfile(self.server_path, os.path.join(folder, "launch.py"))
         self.client.images.build(path=folder, tag=game.container_name)
 
     def create_dockerfile_for(self, folder: str, game: GameMeta) -> None:
@@ -73,18 +63,9 @@ class Launcher:
             game (GameMeta): The metadata of the game
         """
         with open(os.path.join(folder, "Dockerfile"), "w", encoding="utf-8") as file:
-            file.write("""FROM python:3.11-slim\n""")
-            file.write("""WORKDIR /usr/src/app\n""")
-            file.write("""COPY requirements.txt ./requirements.txt\n""")
-            file.write("""RUN pip install --no-cache-dir -r requirements.txt\n""")
-            file.write("""RUN rm requirements.txt\n""")
-            file.write("""COPY launch.py .\n""")
-            file.write("""EXPOSE 8080\n""")
+            file.write("""FROM rizerphe/gamebattle-launcher:latest\n""")
             file.write(f"""COPY {game.file} .\n""")
             file.write(f"ENV COMMAND python {game.file}\n")
-            file.write(
-                f"""CMD ["uvicorn", "launch:launch", "--host", "0.0.0.0", "--port", "8080", "--factory"]\n"""
-            )
 
     def start_game(self, meta: GameMeta) -> Game:
         """Start a game.

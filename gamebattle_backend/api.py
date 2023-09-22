@@ -53,21 +53,15 @@ class GamebattleApi:
     def __init__(
         self,
         games_path: str,
-        requirements_path: str,
-        launcher_path: str,
         network: str | None,
     ) -> None:
         """Initialize the API server.
 
         Args:
             games_path: The path to the games directory.
-            requirements_path: The path to the requirements directory.
-            launcher_path: The path to the launcher executable.
             network: The docker network to use
         """
-        self.manager = Manager(
-            Launcher(games_path, requirements_path, launcher_path, network)
-        )
+        self.manager = Manager(Launcher(games_path, network))
 
     def sessions(
         self, owner: str = fastapi.Depends(firebase_email)
@@ -259,7 +253,5 @@ class GamebattleApi:
 def launch_app() -> fastapi.FastAPI:
     return GamebattleApi(
         os.environ["GAMES_PATH"],
-        os.environ["REQUIREMENTS_PATH"],
-        os.environ["LAUNCHER_PATH"],
         os.environ.get("NETWORK") or None,
     )()
