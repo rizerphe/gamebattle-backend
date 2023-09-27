@@ -145,11 +145,12 @@ class Launcher:
         """
         return Game.start(meta, self.client, self.network)
 
-    def filename_component_valid(self, component: str) -> bool:
+    def filename_component_valid(self, component: str, strict: bool = False) -> bool:
         """Check if a file name component is valid.
 
         Args:
             component (str): The component of the file name
+            strict (bool): Whether to be strict about the file name component
 
         Returns:
             bool: Whether the file name component is valid
@@ -159,7 +160,11 @@ class Launcher:
         if len(component) == 0:
             return False
         allowed_chars = (
-            string.ascii_uppercase + string.ascii_lowercase + string.digits + "_- ."
+            string.ascii_uppercase
+            + string.ascii_lowercase
+            + string.digits
+            + "_-."
+            + ("" if strict else "  ")
         )
         if not all(char in allowed_chars for char in component):
             return False
@@ -168,11 +173,12 @@ class Launcher:
         )
         return any(char in required_chars for char in component)
 
-    def check_file_name(self, filename: str) -> bool:
+    def check_file_name(self, filename: str, strict: bool = False) -> bool:
         """Check if a file name is valid.
 
         Args:
             filename (str): The name of the file
+            strict (bool): Whether to be strict about the file name
 
         Returns:
             bool: Whether the file name is valid
@@ -180,7 +186,9 @@ class Launcher:
         components = filename.split("/")
         if len(components) > 10:
             return False
-        return all(self.filename_component_valid(component) for component in components)
+        return all(
+            self.filename_component_valid(component, strict) for component in components
+        )
 
     def add_game_file(
         self, owner: str, game_file_content: bytes, filename: str
@@ -285,7 +293,7 @@ class Launcher:
             "w",
             encoding="utf-8",
         ) as file:
-            yaml.dump(asdict(metadata), file)
+            yaml.safe_dump(asdict(metadata), file)
 
     def build_game(self, metadata: GameMeta) -> None:
         """Add a game to the manager.
@@ -293,6 +301,8 @@ class Launcher:
         Args:
             metadata (GameMeta): The metadata of the game
         """
+        if not self.check_file_name(metadata.file, strict=True):
+            return
         self.save_metadata(metadata)
         self.create_docker_context_for(metadata)
         self.games.append(metadata)
