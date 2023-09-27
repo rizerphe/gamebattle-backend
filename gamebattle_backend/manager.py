@@ -42,7 +42,6 @@ class Manager:
         self,
         launcher: Launcher,
         config: Config | None = None,
-        launch_strategy: LaunchStrategy = launch_randomly,
     ) -> None:
         """Initialize the manager.
 
@@ -52,7 +51,6 @@ class Manager:
         """
         self.sessions: dict[uuid.UUID, Session] = {}
         self.launcher = launcher
-        self.launch_strategy = launch_strategy
         self.config = config or Config.default()
         self.lock = RLock()
 
@@ -69,11 +67,18 @@ class Manager:
                 if session.owner == user_id
             }
 
-    def create_session(self, owner: str) -> tuple[uuid.UUID, Session]:
+    def create_session(
+        self,
+        owner: str,
+        launch_strategy: LaunchStrategy = launch_randomly,
+        capacity: int = 2,
+    ) -> tuple[uuid.UUID, Session]:
         """Create a session.
 
         Args:
             owner: The user ID of the session owner.
+            launch_strategy: The launch strategy to use.
+            capacity: The number of games to launch.
 
         Raises:
             TooManySessionsError: If the user already has too many sessions.
@@ -81,7 +86,9 @@ class Manager:
         with self.lock:
             if len(self.user_sessions(owner)) >= self.config.max_sessions_per_user:
                 raise TooManySessionsError
-            session = Session.launch(owner, self.launcher, self.launch_strategy)
+            session = Session.launch(
+                owner, self.launcher, launch_strategy, capacity=capacity
+            )
             id_ = uuid.uuid4()
             self.sessions[id_] = session
             return id_, session

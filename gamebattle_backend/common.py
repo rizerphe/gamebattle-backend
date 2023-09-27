@@ -51,3 +51,13 @@ class GameMeta:
         """The name of the container."""
         formatted_name = self.name.lower().replace(" ", "-")
         return f"gamebattle-{formatted_name}"
+
+    @classmethod
+    def folder_name_for(cls, email: str) -> str:
+        """The name of the game's folder"""
+        return email.split("@")[0].split(".")[0]
+
+    @property
+    def folder_name(self) -> str:
+        """The name of the game's folder"""
+        return self.folder_name_for(self.email)

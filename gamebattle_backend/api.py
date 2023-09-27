@@ -1,5 +1,6 @@
 """The API server for the application."""
 import asyncio
+from dataclasses import dataclass
 import os
 import uuid
 
@@ -9,10 +10,18 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 import websockets
 
 from .auth import verify
-from .common import GameOutput
-from .launcher import Prelauncher, launch_preloaded
+from .common import GameMeta, GameOutput
+from .launcher import Prelauncher, launch_own, launch_preloaded
 from .manager import Manager, TooManySessionsError
 from .session import SessionPublic
+
+
+@dataclass
+class File:
+    """A file."""
+
+    path: str
+    content: bytes
 
 
 def firebase_email(
@@ -61,9 +70,8 @@ class GamebattleApi:
             games_path: The path to the games directory.
             network: The docker network to use
         """
-        self.manager = Manager(
-            Prelauncher(games_path, network), launch_strategy=launch_preloaded
-        )
+        self.launcher = Prelauncher(games_path, network)
+        self.manager = Manager(self.launcher)
 
     def sessions(
         self, owner: str = fastapi.Depends(firebase_email)
@@ -101,11 +109,39 @@ class GamebattleApi:
             owner: The user ID of the session owner.
         """
         try:
-            return self.manager.create_session(owner)[0]
+            return self.manager.create_session(owner, launch_strategy=launch_preloaded)[
+                0
+            ]
         except TooManySessionsError:
             raise fastapi.HTTPException(
                 status_code=400, detail="Too many sessions for user."
             )
+
+    def create_own_session(
+        self,
+        owner: str = fastapi.Depends(firebase_email),
+    ) -> uuid.UUID:
+        """Create own session.
+
+        Args:
+            owner: The user ID of the session owner.
+        """
+        try:
+            for session_id, session in self.manager.user_sessions(owner).items():
+                if len(session.games) != 1:
+                    continue
+                game = session.games[0]
+                if game.metadata.email == owner:
+                    self.manager.stop_session(session_id, owner)
+            return self.manager.create_session(
+                owner, launch_strategy=launch_own, capacity=1
+            )[0]
+        except TooManySessionsError:
+            raise fastapi.HTTPException(
+                status_code=400, detail="Too many sessions for user."
+            )
+        except ValueError:
+            raise fastapi.HTTPException(status_code=400, detail="No games available.")
 
     def stop_session(
         self,
@@ -232,6 +268,85 @@ class GamebattleApi:
         async for message in game_socket:
             await websocket.send_text(message)
 
+    def add_game_file(
+        self,
+        content: bytes = fastapi.Body(...),
+        filename: str = fastapi.Body(...),
+        owner: str = fastapi.Depends(firebase_email),
+    ) -> None:
+        """Add a game file.
+
+        Args:
+            content: The file content.
+            filename: The file name.
+            owner: The user ID of the session owner.
+        """
+        try:
+            self.launcher.add_game_file(owner, content, filename)
+        except ValueError:
+            raise fastapi.HTTPException(
+                status_code=400, detail="Invalid file name or content."
+            )
+
+    def remove_game_file(
+        self,
+        filename: str,
+        owner: str = fastapi.Depends(firebase_email),
+    ) -> None:
+        """Remove a game file.
+
+        Args:
+            filename: The file name.
+            owner: The user ID of the session owner.
+        """
+        try:
+            self.launcher.remove_game_file(owner, filename)
+        except ValueError:
+            raise fastapi.HTTPException(
+                status_code=400, detail="Invalid file name or content."
+            )
+
+    def get_game_files(
+        self,
+        owner: str = fastapi.Depends(firebase_email),
+    ) -> list[File]:
+        """List game files.
+
+        Args:
+            owner: The user ID of the session owner.
+        """
+        return [
+            File(path, content)
+            for path, content in self.launcher.get_game_files(owner).items()
+        ]
+
+    def get_game_metadata(
+        self,
+        owner: str = fastapi.Depends(firebase_email),
+    ) -> GameMeta | None:
+        """Get game metadata.
+
+        Args:
+            owner: The user ID of the session owner.
+        """
+        return self.launcher.get_game_metadata(owner)
+
+    def build_game(
+        self,
+        name: str = fastapi.Body(...),
+        file: str = fastapi.Body(...),
+        owner: str = fastapi.Depends(firebase_email),
+    ) -> None:
+        """Build a game.
+
+        Args:
+            name: The game name.
+            file: The game entrypoint.
+            owner: The user ID of the session owner.
+        """
+        metadata = GameMeta(name, "", file, owner)
+        self.launcher.build_game(metadata)
+
     def __call__(self) -> fastapi.FastAPI:
         """Return the API server."""
         api = fastapi.FastAPI()
@@ -244,11 +359,17 @@ class GamebattleApi:
         )
         api.get("/sessions")(self.sessions)
         api.post("/sessions")(self.create_session)
+        api.post("/sessions/own")(self.create_own_session)
         api.get("/sessions/{session_id}")(self.session)
         api.delete("/sessions/{session_id}")(self.stop_session)
         api.post("/sessions/{session_id}/{game_id}/send")(self.send)
         api.get("/sessions/{session_id}/{game_id}/receive")(self.receive)
         api.websocket("/sessions/{session_id}/{game_id}/ws")(self.ws)
+        api.get("/game")(self.get_game_files)
+        api.post("/game")(self.add_game_file)
+        api.delete("/game/{filename:path}")(self.remove_game_file)
+        api.get("/game/meta")(self.get_game_metadata)
+        api.post("/game/build")(self.build_game)
         return api
 
 
