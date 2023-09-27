@@ -1,8 +1,17 @@
 """Manage the authentication of users"""
+from dataclasses import dataclass
 import re
 
 import firebase_admin
 from firebase_admin import auth
+
+
+@dataclass
+class User:
+    """A user"""
+
+    email: str
+    name: str
 
 
 firebase_admin.initialize_app()
@@ -33,4 +42,23 @@ def verify(token: str) -> str | None:
     email = user["email"]
     if validate(email):
         return email
+    return None
+
+
+def verify_user(token: str) -> User | None:
+    """Verify the token of a user
+
+    Args:
+        token (str): The token of the user
+
+    Returns:
+        User: The user
+    """
+    try:
+        user = auth.verify_id_token(token)
+    except Exception:
+        return None
+    email = user["email"]
+    if validate(email):
+        return User(email=email, name=user["name"])
     return None

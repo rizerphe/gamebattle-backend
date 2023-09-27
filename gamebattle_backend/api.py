@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 import websockets
 
-from .auth import verify
+from .auth import User, verify, verify_user
 from .common import GameMeta, GameOutput
 from .launcher import Prelauncher, launch_own, launch_preloaded
 from .manager import Manager, TooManySessionsError
@@ -54,6 +54,38 @@ def firebase_email(
         )
     res.headers["WWW-Authenticate"] = 'Bearer realm="auth_required"'
     return email
+
+
+def firebase_user(
+    res: fastapi.Response,
+    credential: HTTPAuthorizationCredentials = fastapi.Depends(
+        HTTPBearer(auto_error=False)
+    ),
+) -> User:
+    """A firebase dependency returning the user.
+
+    Args:
+        res: The response object.
+        credential: The credential object.
+
+    Returns:
+        The user.
+    """
+    if credential is None:
+        raise fastapi.HTTPException(
+            status_code=fastapi.status.HTTP_401_UNAUTHORIZED,
+            detail="Bearer authentication is needed",
+            headers={"WWW-Authenticate": 'Bearer realm="auth_required"'},
+        )
+    user = verify_user(credential.credentials)
+    if user is None:
+        raise fastapi.HTTPException(
+            status_code=fastapi.status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+            headers={"WWW-Authenticate": 'Bearer error="invalid_token"'},
+        )
+    res.headers["WWW-Authenticate"] = 'Bearer realm="auth_required"'
+    return user
 
 
 class GamebattleApi:
@@ -335,7 +367,7 @@ class GamebattleApi:
         self,
         name: str = fastapi.Body(...),
         file: str = fastapi.Body(...),
-        owner: str = fastapi.Depends(firebase_email),
+        owner: User = fastapi.Depends(firebase_user),
     ) -> None:
         """Build a game.
 
@@ -344,7 +376,7 @@ class GamebattleApi:
             file: The game entrypoint.
             owner: The user ID of the session owner.
         """
-        metadata = GameMeta(name, "", file, owner)
+        metadata = GameMeta(name, owner.name, file, owner.email)
         self.launcher.build_game(metadata)
 
     def __call__(self) -> fastapi.FastAPI:
