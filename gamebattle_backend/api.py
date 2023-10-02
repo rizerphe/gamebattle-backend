@@ -386,6 +386,17 @@ class GamebattleApi:
         metadata = GameMeta(name, owner.name, file, owner.email)
         self.launcher.build_game(metadata)
 
+    def stats(
+        self,
+        owner: str = fastapi.Depends(firebase_email),
+    ) -> dict[str, int]:
+        """Get the stats of the user.
+
+        Args:
+            owner: The user ID of the session owner.
+        """
+        return {"permitted": True}
+
     def __call__(self) -> fastapi.FastAPI:
         """Return the API server."""
         api = fastapi.FastAPI()
@@ -409,6 +420,7 @@ class GamebattleApi:
         api.delete("/game/{filename:path}")(self.remove_game_file)
         api.get("/game/meta")(self.get_game_metadata)
         api.post("/game/build")(self.build_game)
+        api.get("/stats")(self.stats)
         return api
 
 
