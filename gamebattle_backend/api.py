@@ -95,15 +95,18 @@ class GamebattleApi:
         self,
         games_path: str,
         network: str | None,
+        enable_competition: bool = True,
     ) -> None:
         """Initialize the API server.
 
         Args:
             games_path: The path to the games directory.
             network: The docker network to use
+            enable_competition: Whether to enable competition mode.
         """
         self.launcher = Prelauncher(games_path, network)
         self.manager = Manager(self.launcher)
+        self.enable_competition = enable_competition
 
     def sessions(
         self, owner: str = fastapi.Depends(firebase_email)
@@ -140,6 +143,10 @@ class GamebattleApi:
         Args:
             owner: The user ID of the session owner.
         """
+        if not self.enable_competition:
+            raise fastapi.HTTPException(
+                status_code=400, detail="Competition mode is disabled."
+            )
         try:
             return self.manager.create_session(owner, launch_strategy=launch_preloaded)[
                 0
@@ -409,4 +416,5 @@ def launch_app() -> fastapi.FastAPI:
     return GamebattleApi(
         os.environ["GAMES_PATH"],
         os.environ.get("NETWORK") or None,
+        os.environ.get("ENABLE_COMPETITION") == "true",
     )()
