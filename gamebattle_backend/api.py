@@ -369,8 +369,6 @@ class GamebattleApi:
         api.post("/sessions/own")(self.create_own_session)
         api.get("/sessions/{session_id}")(self.session)
         api.delete("/sessions/{session_id}")(self.stop_session)
-        api.post("/sessions/{session_id}/{game_id}/send")(self.send)
-        api.get("/sessions/{session_id}/{game_id}/receive")(self.receive)
         api.websocket("/sessions/{session_id}/{game_id}/ws")(self.ws)
         api.get("/game")(self.get_game_files)
         api.post("/game")(self.add_game_file)
