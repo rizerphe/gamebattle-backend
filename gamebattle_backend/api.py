@@ -10,7 +10,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 import websockets
 
 from .auth import User, verify, verify_user
-from .common import GameMeta, GameOutput
+from .common import GameMeta
 from .launcher import Prelauncher, launch_own, launch_preloaded
 from .manager import Manager, TooManySessionsError
 from .session import SessionPublic
@@ -248,7 +248,7 @@ class GamebattleApi:
                 websockets.ConnectionClosedOK,
                 fastapi.websockets.WebSocketDisconnect,
             ):
-                websocket.close()
+                await websocket.close()
 
     async def _ws_receive(
         self,
