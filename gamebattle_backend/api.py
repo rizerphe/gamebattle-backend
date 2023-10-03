@@ -241,14 +241,7 @@ class GamebattleApi:
             game_socket: The game's websocket.
         """
         async for message in websocket.iter_text():
-            try:
-                await game_socket.send(message)
-            except (
-                websockets.ConnectionClosedError,
-                websockets.ConnectionClosedOK,
-                fastapi.websockets.WebSocketDisconnect,
-            ):
-                await websocket.close()
+            await game_socket.send(message)
 
     async def _ws_receive(
         self,
@@ -261,8 +254,11 @@ class GamebattleApi:
             websocket: The websocket.
             game_socket: The game's websocket.
         """
-        async for message in game_socket:
-            await websocket.send_text(message)
+        try:
+            async for message in game_socket:
+                await websocket.send_text(message)
+        except websockets.exceptions.ConnectionClosedError:
+            await websocket.close()
 
     def add_game_file(
         self,
