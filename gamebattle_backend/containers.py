@@ -8,10 +8,7 @@ import socket
 import time
 
 import docker
-import requests
 import websockets
-
-from .common import GameOutput, Status
 
 
 @dataclass
@@ -128,3 +125,8 @@ class Container:
                     yield ws
             else:
                 raise
+
+    def kill(self) -> None:
+        """Kill the container."""
+        self.container.kill()
+        self.container.remove()

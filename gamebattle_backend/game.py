@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import websockets
 
-from .common import GameMeta, GameOutput
+from .common import GameMeta
 from .containers import Container
 
 if TYPE_CHECKING:
