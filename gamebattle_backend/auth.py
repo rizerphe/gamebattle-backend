@@ -23,7 +23,7 @@ def validate(email: str) -> bool:
     Args:
         email (str): The email of the user
     """
-    return bool(re.match(r"^[a-z.]+\.pn@ucu\.edu\.ua$", email))
+    return bool(re.match(r"^[a-z.-]+@ucu\.edu\.ua$", email))
 
 
 def verify(token: str) -> str | None:
