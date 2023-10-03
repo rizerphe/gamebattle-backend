@@ -45,18 +45,6 @@ class Game:
         """Stop the game."""
         self.container.kill()
 
-    def send(self, text: str) -> None:
-        """Send text to the game.
-
-        Args:
-            text (str): The text to send
-        """
-        self.container.stdin(text)
-
-    def receive(self) -> GameOutput:
-        """Receive text from the game."""
-        return self.container.output()
-
     @asynccontextmanager
     async def ws(self) -> websockets.WebSocketServerProtocol:
         """Return a WebSocket stream for the game."""

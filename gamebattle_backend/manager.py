@@ -110,35 +110,6 @@ class Manager:
             session.stop()
             del self.sessions[session_id]
 
-    def send(
-        self, session_id: uuid.UUID, game_id: int, text: str, owner: str | None = None
-    ) -> None:
-        """Send a message to a session.
-
-        Args:
-            session_id: The session ID.
-            game_id: The game ID.
-            text: The text to send.
-        """
-        session = self.sessions[session_id]
-        if owner is None or session.owner == owner:
-            session.games[game_id].send(text)
-
-    def receive(
-        self, session_id: uuid.UUID, game_id: int, owner: str | None = None
-    ) -> GameOutput | None:
-        """Receive a message from a session.
-
-        Args:
-            session_id: The session ID.
-            game_id: The game ID.
-            owner: The user ID of the session owner.
-        """
-        session = self.sessions[session_id]
-        if owner is None or session.owner == owner:
-            return session.games[game_id].receive()
-        return None
-
     @asynccontextmanager
     async def ws(
         self, session_id: uuid.UUID, game_id: int, owner: str | None = None

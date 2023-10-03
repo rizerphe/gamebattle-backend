@@ -109,40 +109,6 @@ class Container:
         """Restart the container."""
         self.container.restart()
 
-    def output(self) -> GameOutput:
-        """Retrieve the output of the game."""
-        try:
-            return GameOutput(
-                **requests.get(f"http://{self.net_addr}/output", timeout=1).json()
-            )
-        except requests.exceptions.ConnectionError:
-            return GameOutput(
-                output="Game did not produce any output.",
-                whole="Game did not produce any output.",
-                done=True,
-            )
-
-    def kill(self) -> None:
-        """Kill the container."""
-        self.container.kill()
-
-    def stdin(self, text: str) -> Status:
-        """Send text to the stdin of the game.
-
-        Args:
-            text (str): The text to send
-
-        Returns:
-            Status: The status of the request
-        """
-        return Status(
-            **requests.post(
-                f"http://{self.net_addr}/stdin",
-                json=text,
-                timeout=1,
-            ).json()
-        )
-
     @asynccontextmanager
     async def ws(self, retries: int = 10) -> websockets.WebSocketServerProtocol:
         """Return a WebSocket stream for the game.

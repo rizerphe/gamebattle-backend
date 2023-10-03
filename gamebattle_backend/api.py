@@ -198,49 +198,6 @@ class GamebattleApi:
         except KeyError:
             raise fastapi.HTTPException(status_code=404, detail="Session not found.")
 
-    def send(
-        self,
-        session_id: uuid.UUID,
-        game_id: int,
-        text: str = fastapi.Body(...),
-        owner: str = fastapi.Depends(firebase_email),
-    ) -> None:
-        """Send a message to a game.
-
-        Args:
-            session_id: The session ID.
-            game_id: The game ID.
-            text: The text to send.
-            owner: The user ID of the session owner.
-        """
-        try:
-            self.manager.send(session_id, game_id, text, owner)
-        except KeyError:
-            raise fastapi.HTTPException(status_code=404, detail="Session not found.")
-
-    def receive(
-        self,
-        session_id: uuid.UUID,
-        game_id: int,
-        owner: str = fastapi.Depends(firebase_email),
-    ) -> GameOutput:
-        """Receive the output from a game (non-authenticated).
-
-        Args:
-            session_id: The session ID.
-            game_id: The game ID.
-            owner: The user ID of the session owner.
-        """
-        try:
-            output = self.manager.receive(session_id, game_id, owner)
-            if output is None:
-                raise fastapi.HTTPException(
-                    status_code=404, detail="Session not found."
-                )
-            return output
-        except KeyError:
-            raise fastapi.HTTPException(status_code=404, detail="Session not found.")
-
     async def ws(
         self,
         session_id: uuid.UUID,
