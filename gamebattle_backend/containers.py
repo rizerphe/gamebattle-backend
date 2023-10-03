@@ -128,5 +128,6 @@ class Container:
 
     def kill(self) -> None:
         """Kill the container."""
-        self.container.kill()
+        if self.container.status == "running":
+            self.container.kill()
         self.container.remove()
