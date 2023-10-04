@@ -2,6 +2,7 @@
 from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager, closing
+import contextlib
 from dataclasses import dataclass, field
 import ipaddress
 import socket
@@ -126,8 +127,17 @@ class Container:
             else:
                 raise
 
+    @property
+    def running(self) -> bool:
+        return self.container.status in ["created", "running"]
+
     def kill(self) -> None:
         """Kill the container."""
-        if self.container.status in ["created", "running"]:
+        if self.running:
             self.container.kill()
         self.container.remove()
+
+    def try_kill(self) -> None:
+        """Try to kill the container, but don't raise any errors."""
+        with contextlib.suppress(Exception):
+            self.kill()

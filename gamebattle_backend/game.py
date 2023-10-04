@@ -43,7 +43,7 @@ class Game:
 
     def stop(self) -> None:
         """Stop the game."""
-        self.container.kill()
+        self.container.try_kill()
 
     @asynccontextmanager
     async def ws(self) -> websockets.WebSocketServerProtocol:
