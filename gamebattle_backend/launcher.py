@@ -113,6 +113,7 @@ class Launcher:
             game (GameMeta): The metadata of the game
         """
         self.create_dockerfile_for(game)
+        os.makedirs(os.path.join(self.games_path, game.folder_name), exist_ok=True)
         self.client.images.build(
             path=os.path.join(self.games_path, game.folder_name),
             dockerfile=f"../{game.folder_name}.Dockerfile",
