@@ -306,7 +306,7 @@ class Launcher:
             return
         self.save_metadata(metadata)
         self.create_docker_context_for(metadata)
-        self.games.append(metadata)
+        self.games = [x for x in self.games if x.email != metadata.email] + [metadata]
 
     def exists_game(self, metadata: GameMeta) -> bool:
         """Check if a game exists.
