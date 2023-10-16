@@ -105,7 +105,7 @@ class Container:
 
     def restart(self) -> None:
         """Restart the container."""
-        self.container.restart()
+        self.container.restart(timeout=0)
 
     @asynccontextmanager
     async def ws(self, retries: int = 10) -> websockets.WebSocketServerProtocol:

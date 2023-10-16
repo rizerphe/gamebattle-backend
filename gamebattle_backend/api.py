@@ -198,6 +198,26 @@ class GamebattleApi:
         except KeyError:
             raise fastapi.HTTPException(status_code=404, detail="Session not found.")
 
+    def restart_game(
+        self,
+        session_id: uuid.UUID,
+        game_id: int,
+        owner: str = fastapi.Depends(firebase_email),
+    ) -> None:
+        """Restart a game.
+
+        Args:
+            session_id: The session ID.
+            game_id: The game ID.
+            owner: The user ID of the session owner.
+        """
+        try:
+            self.manager.user_sessions(owner)[session_id].games[game_id].restart()
+        except KeyError:
+            raise fastapi.HTTPException(
+                status_code=404, detail="Session or game not found."
+            )
+
     async def ws(
         self,
         session_id: uuid.UUID,
@@ -366,6 +386,7 @@ class GamebattleApi:
         api.get("/sessions/{session_id}")(self.session)
         api.delete("/sessions/{session_id}")(self.stop_session)
         api.websocket("/sessions/{session_id}/{game_id}/ws")(self.ws)
+        api.post("/sessions/{session_id}/{game_id}/restart")(self.restart_game)
         api.get("/game")(self.get_game_files)
         api.post("/game")(self.add_game_file)
         api.delete("/game/{filename:path}")(self.remove_game_file)
