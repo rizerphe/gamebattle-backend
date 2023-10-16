@@ -104,7 +104,9 @@ class GamebattleApi:
             network: The docker network to use
             enable_competition: Whether to enable competition mode.
         """
-        self.launcher = Prelauncher(games_path, network)
+        self.launcher = Prelauncher(
+            games_path, network, prelaunch=3 if enable_competition else 0
+        )
         self.manager = Manager(self.launcher)
         self.enable_competition = enable_competition
 
