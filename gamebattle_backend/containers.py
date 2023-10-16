@@ -129,6 +129,7 @@ class Container:
 
     @property
     def running(self) -> bool:
+        self.container.reload()
         return self.container.status in ["created", "running"]
 
     def kill(self) -> None:

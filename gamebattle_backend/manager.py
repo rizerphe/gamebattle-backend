@@ -130,3 +130,25 @@ class Manager:
                 yield ws
                 return
         raise KeyError
+
+    @asynccontextmanager
+    async def ws_and_game(
+        self, session_id: uuid.UUID, game_id: int, owner: str | None = None
+    ):
+        """Return a WebSocket stream for a session.
+
+        Args:
+            session_id: The session ID.
+            game_id: The game ID.
+            owner: The user ID of the session owner.
+
+        Raises:
+            KeyError: If the session does not exist.
+        """
+        session = self.sessions[session_id]
+        if owner is None or session.owner == owner:
+            game = session.games[game_id]
+            async with game.ws() as ws:
+                yield (game, ws)
+                return
+        raise KeyError

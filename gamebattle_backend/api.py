@@ -240,11 +240,20 @@ class GamebattleApi:
         if owner is None:
             await websocket.close()
         try:
-            async with self.manager.ws(session_id, game_id, owner) as game_socket:
+            async with self.manager.ws_and_game(session_id, game_id, owner) as (
+                game,
+                game_socket,
+            ):
+                if game_socket is None:
+                    await websocket.send_json({"type": "bye"})
+                    await websocket.close()
+                    return
                 await asyncio.wait(
                     [
                         asyncio.create_task(self._ws_send(websocket, game_socket)),
-                        asyncio.create_task(self._ws_receive(websocket, game_socket)),
+                        asyncio.create_task(
+                            self._ws_receive(game, websocket, game_socket)
+                        ),
                     ],
                     return_when=asyncio.FIRST_COMPLETED,
                 )
@@ -267,6 +276,7 @@ class GamebattleApi:
 
     async def _ws_receive(
         self,
+        game: "Game",
         websocket: fastapi.WebSocket,
         game_socket: websockets.WebSocketClientProtocol,
     ) -> None:
@@ -278,8 +288,11 @@ class GamebattleApi:
         """
         try:
             async for message in game_socket:
-                await websocket.send_text(message)
+                await websocket.send_json({"type": "stdout", "data": message})
         except websockets.exceptions.ConnectionClosedError:
+            await asyncio.sleep(0.1)
+            if not game.running:
+                await websocket.send_json({"type": "bye"})
             await websocket.close()
 
     def add_game_file(

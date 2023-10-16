@@ -45,8 +45,15 @@ class Game:
         """Stop the game."""
         self.container.try_kill()
 
+    @property
+    def running(self) -> bool:
+        """Return whether the game is running."""
+        return self.container.running
+
     @asynccontextmanager
     async def ws(self) -> websockets.WebSocketServerProtocol:
         """Return a WebSocket stream for the game."""
+        if not self.running:
+            yield None
         async with self.container.ws() as ws:
             yield ws
