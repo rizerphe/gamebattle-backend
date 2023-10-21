@@ -4,21 +4,6 @@ from enum import Enum
 from pydantic.dataclasses import dataclass
 
 
-@dataclass
-class GameOutput:
-    """The output of a game.
-
-    Attributes:
-        output (str): The characters appended to the output since the last request
-        whole (str): All the output
-        done (bool): Whether the game has finished
-    """
-
-    output: str
-    whole: str
-    done: bool
-
-
 class RequestStatus(Enum):
     """The status of a request."""
 

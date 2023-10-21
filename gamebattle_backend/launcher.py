@@ -342,11 +342,14 @@ class Prelauncher(Launcher):
 
     def prelaunch_games(self) -> None:
         """Prelaunches games."""
-        if self.games:
-            for _ in range(len(self.prelaunched), self.prelaunch):
-                meta = random.choice(self.games)
-                game = super().start_game(meta)
-                self.prelaunched.setdefault(meta, []).append(game)
+        if not self.games:
+            return
+        n_prelaunched = sum(len(x) for x in self.prelaunched.values())
+        if n_prelaunched >= self.prelaunch:
+            return
+        for meta in self.prelaunch_strategy(self, self.prelaunch - n_prelaunched, ""):
+            game = super().start_game(meta)
+            self.prelaunched.setdefault(meta, []).append(game)
 
     def start_game(self, meta: GameMeta) -> Game:
         """Start a game.

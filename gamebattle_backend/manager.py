@@ -8,11 +8,12 @@ import uuid
 
 import websockets
 
+from gamebattle_backend.game import Game
+
 from .session import LaunchStrategy, Session, launch_randomly
 
 if TYPE_CHECKING:
     from .launcher import Launcher
-    from .common import GameOutput
 
 
 @dataclass
@@ -53,6 +54,35 @@ class Manager:
         self.launcher = launcher
         self.config = config or Config.default()
         self.lock = RLock()
+
+    def get_session(self, user_id: str, session_id: uuid.UUID) -> Session:
+        """Return a session.
+
+        Args:
+            user_id: The user ID.
+            session_id: The session ID.
+
+        Raises:
+            KeyError: If the session does not exist.
+        """
+        with self.lock:
+            session = self.sessions[session_id]
+            if session.owner != user_id:
+                raise KeyError
+            return session
+
+    def get_game(self, user_id: str, session_id: uuid.UUID, game_id: int) -> Game:
+        """Return a game.
+
+        Args:
+            user_id: The user ID.
+            session_id: The session ID.
+            game_id: The game ID.
+
+        Raises:
+            KeyError: If the session or game does not exist.
+        """
+        return self.get_session(user_id, session_id).games[game_id]
 
     def user_sessions(self, user_id: str) -> dict[uuid.UUID, Session]:
         """Return a dictionary of sessions for a user.

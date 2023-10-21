@@ -2,13 +2,11 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 import time
-from typing import Protocol, TYPE_CHECKING, TypeVar
+from typing import Protocol, TypeVar
 
+from .common import GameMeta
+from .game import Game
 from .launcher import Launcher, launch_randomly
-
-if TYPE_CHECKING:
-    from .common import GameMeta
-    from .game import Game
 
 
 @dataclass
@@ -17,7 +15,7 @@ class SessionPublic:
 
     owner: str
     launch_time: float
-    games: list[str]
+    games: list[dict]
 
 
 LauncherType = TypeVar("LauncherType", bound="Launcher")
@@ -77,10 +75,15 @@ class Session:
             game.stop()
 
     @property
+    def over(self) -> bool:
+        """Return whether the session is over."""
+        return all(game.over for game in self.games)
+
+    @property
     def public(self) -> SessionPublic:
         """Return a public version of the session."""
         return SessionPublic(
             owner=self.owner,
             launch_time=self.launch_time,
-            games=[game.metadata.name for game in self.games],
+            games=[game.public for game in self.games],
         )

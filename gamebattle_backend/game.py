@@ -15,11 +15,20 @@ if TYPE_CHECKING:
 
 
 @dataclass
+class GamePublic:
+    """The public interface of a game."""
+
+    name: str
+    over: bool
+
+
+@dataclass
 class Game:
     """A game object, containing all the metadata"""
 
     metadata: GameMeta
     container: Container
+    over: bool = False  # TODO: make this more robust to game restarts
 
     @classmethod
     def start(
@@ -48,7 +57,10 @@ class Game:
     @property
     def running(self) -> bool:
         """Return whether the game is running."""
-        return self.container.running
+        if self.container.running:
+            return True
+        self.over = True
+        return False
 
     @asynccontextmanager
     async def ws(self) -> websockets.WebSocketServerProtocol:
@@ -57,3 +69,8 @@ class Game:
             yield None
         async with self.container.ws() as ws:
             yield ws
+
+    @property
+    def public(self) -> GamePublic:
+        """Return the public interface of the game."""
+        return GamePublic(name=self.metadata.name, over=self.over)
