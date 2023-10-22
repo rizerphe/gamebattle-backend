@@ -25,7 +25,7 @@ from gamebattle_backend.report_store_redis import RedisReportStore
 
 from .auth import User, verify, verify_user
 from .common import GameMeta
-from .launcher import Prelauncher, launch_own
+from .launcher import Prelauncher, launch_own, launch_specified
 from .manager import Manager, TooManySessionsError
 from .session import SessionPublic
 
@@ -210,26 +210,34 @@ class GamebattleApi:
 
     async def create_own_session(
         self,
+        game_id: str | None = fastapi.Body(None, embed=True),
         owner: str = fastapi.Depends(firebase_email),
     ) -> uuid.UUID:
         """Create own session.
 
         Args:
+            game_id: The id of the game to launch (admin only)
             owner: The user ID of the session owner.
         """
         if self.enable_competition and owner not in self.admin_emails:
             raise fastapi.HTTPException(
                 status_code=400, detail="Competition mode is disabled."
             )
+        if game_id is not None and owner not in self.admin_emails:
+            raise fastapi.HTTPException(
+                status_code=400, detail="Cannot specify game ID."
+            )
         try:
             for session_id, session in self.manager.user_sessions(owner).items():
-                if len(session.games) != 1:
+                if len(session.games) != 1 and owner not in self.admin_emails:
                     continue
-                game = session.games[0]
-                if game.metadata.email == owner:
-                    self.manager.stop_session(session_id, owner)
+                self.manager.stop_session(session_id, owner)
             session = await self.manager.create_session(
-                owner, launch_strategy=launch_own, capacity=1
+                owner,
+                launch_strategy=launch_own
+                if game_id is None
+                else launch_specified(game_id),
+                capacity=1,
             )
             return session[0]
         except TooManySessionsError:
@@ -354,6 +362,7 @@ class GamebattleApi:
         self,
         content: bytes = fastapi.Body(...),
         filename: str = fastapi.Body(...),
+        game_id: str | None = fastapi.Body(None),
         owner: str = fastapi.Depends(firebase_email),
     ) -> None:
         """Add a game file.
@@ -361,10 +370,23 @@ class GamebattleApi:
         Args:
             content: The file content.
             filename: The file name.
+            game_id: The id of the game to modify (admin only)
             owner: The user ID of the session owner.
         """
+        if game_id is not None and owner not in self.admin_emails:
+            raise fastapi.HTTPException(
+                status_code=400, detail="Cannot specify game ID."
+            )
+        if self.enable_competition and owner not in self.admin_emails:
+            raise fastapi.HTTPException(
+                status_code=400, detail="Competition mode is disabled."
+            )
         try:
-            self.launcher.add_game_file(owner, content, filename)
+            self.launcher.add_game_file(
+                owner if game_id is None else self.launcher[game_id].email,
+                content,
+                filename,
+            )
         except ValueError:
             raise fastapi.HTTPException(
                 status_code=400, detail="Invalid file name or content."
@@ -381,8 +403,36 @@ class GamebattleApi:
             filename: The file name.
             owner: The user ID of the session owner.
         """
+        if self.enable_competition and owner not in self.admin_emails:
+            raise fastapi.HTTPException(
+                status_code=400, detail="Competition mode is disabled."
+            )
         try:
             self.launcher.remove_game_file(owner, filename)
+        except ValueError:
+            raise fastapi.HTTPException(
+                status_code=400, detail="Invalid file name or content."
+            )
+
+    def admin_remove_game_file(
+        self,
+        game_id: str,
+        filename: str,
+        owner: str = fastapi.Depends(firebase_email),
+    ) -> None:
+        """Remove a game file.
+
+        Args:
+            game_id: The id of the game to modify (admin only)
+            filename: The file name.
+            owner: The user ID of the session owner.
+        """
+        if owner not in self.admin_emails:
+            raise fastapi.HTTPException(
+                status_code=400, detail="Cannot specify game ID."
+            )
+        try:
+            self.launcher.remove_game_file(self.launcher[game_id].email, filename)
         except ValueError:
             raise fastapi.HTTPException(
                 status_code=400, detail="Invalid file name or content."
@@ -397,9 +447,35 @@ class GamebattleApi:
         Args:
             owner: The user ID of the session owner.
         """
+        if self.enable_competition and owner not in self.admin_emails:
+            raise fastapi.HTTPException(
+                status_code=400, detail="Competition mode is disabled."
+            )
         return [
             File(path, content)
             for path, content in self.launcher.get_game_files(owner).items()
+        ]
+
+    def admin_get_game_files(
+        self,
+        game_id: str,
+        owner: str = fastapi.Depends(firebase_email),
+    ) -> list[File]:
+        """List game files (admin only).
+
+        Args:
+            game_id: The id of the game to modify.
+            owner: The user ID of the session owner.
+        """
+        if owner not in self.admin_emails:
+            raise fastapi.HTTPException(
+                status_code=400, detail="Cannot specify game ID."
+            )
+        return [
+            File(path, content)
+            for path, content in self.launcher.get_game_files(
+                self.launcher[game_id].email
+            ).items()
         ]
 
     def get_game_metadata(
@@ -411,12 +487,34 @@ class GamebattleApi:
         Args:
             owner: The user ID of the session owner.
         """
+        if self.enable_competition and owner not in self.admin_emails:
+            raise fastapi.HTTPException(
+                status_code=400, detail="Competition mode is disabled."
+            )
         return self.launcher.get_game_metadata(owner)
+
+    def admin_get_game_metadata(
+        self,
+        game_id: str,
+        owner: str = fastapi.Depends(firebase_email),
+    ) -> GameMeta | None:
+        """Get game metadata.
+
+        Args:
+            game_id: The id of the game to fetch (admin only)
+            owner: The user ID of the session owner.
+        """
+        if owner not in self.admin_emails:
+            raise fastapi.HTTPException(
+                status_code=400, detail="Cannot specify game ID."
+            )
+        return self.launcher.get_game_metadata(self.launcher[game_id].email)
 
     def build_game(
         self,
         name: str = fastapi.Body(...),
         file: str = fastapi.Body(...),
+        game_id: str | None = fastapi.Body(None),
         owner: User = fastapi.Depends(firebase_user),
     ) -> None:
         """Build a game.
@@ -424,9 +522,23 @@ class GamebattleApi:
         Args:
             name: The game name.
             file: The game entrypoint.
+            game_id: The id of the game to modify (admin only)
             owner: The user ID of the session owner.
         """
-        metadata = GameMeta(name, owner.name, file, owner.email)
+        if game_id is not None and owner.email not in self.admin_emails:
+            raise fastapi.HTTPException(
+                status_code=400, detail="Cannot specify game ID."
+            )
+        if self.enable_competition and owner.email not in self.admin_emails:
+            raise fastapi.HTTPException(
+                status_code=400, detail="Competition mode is disabled."
+            )
+        metadata = GameMeta(
+            name,
+            owner.name if game_id is None else self.launcher[game_id].author,
+            file,
+            owner.email if game_id is None else self.launcher[game_id].email,
+        )
         self.launcher.build_game(metadata)
 
     async def stats(
@@ -645,9 +757,12 @@ class GamebattleApi:
         api.post("/sessions/{session_id}/preference")(self.set_preference)
         api.get("/leaderboard")(self.leaderboard)
         api.get("/game")(self.get_game_files)
+        api.get("/admin/game/{game_id}")(self.admin_get_game_files)
         api.post("/game")(self.add_game_file)
         api.delete("/game/{filename:path}")(self.remove_game_file)
+        api.delete("/admin/game/{game_id}/{filename:path}")(self.admin_remove_game_file)
         api.get("/game/meta")(self.get_game_metadata)
+        api.get("/admin/game/{game_id}/meta")(self.admin_get_game_metadata)
         api.post("/game/build")(self.build_game)
         api.get("/stats")(self.stats)
         return api

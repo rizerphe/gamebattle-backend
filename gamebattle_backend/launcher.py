@@ -74,6 +74,13 @@ async def launch_own(launcher: Launcher, capacity: int, owner: str) -> list[Game
     return random.sample(available, capacity)
 
 
+def launch_specified(game_id: str) -> LaunchStrategy:
+    async def launch(launcher: Launcher, capacity: int, owner: str) -> list[GameMeta]:
+        return [launcher[game_id]]
+
+    return launch
+
+
 class Launcher:
     """A launcher for game containers."""
 
