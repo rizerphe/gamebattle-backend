@@ -26,8 +26,8 @@ class Preference:
     async def from_session(cls, session: Session, first_score: float) -> Preference:
         return cls(
             (
-                session.games[0].metadata.folder_name,
-                session.games[1].metadata.folder_name,
+                session.games[0].metadata.id,
+                session.games[1].metadata.id,
             ),
             first_score,
             session.owner,
@@ -117,7 +117,7 @@ class RatingSystem(Protocol):
     async def clear(self) -> None:
         """Clear the rating system."""
 
-    def top(self) -> AsyncIterator[Rating]:
+    def top(self, launcher: Launcher) -> AsyncIterator[Rating]:
         """Get the top games."""
 
     async def score(self, game: str) -> float:
@@ -160,9 +160,12 @@ class EloRatingSystem:
     def expected_score(self, game: str, other: str) -> float:
         return 1 / (1 + 10 ** ((self.ratings[other] - self.ratings[game]) / 400))
 
-    async def top(self) -> AsyncIterator[Rating]:
+    async def top(self, launcher: Launcher) -> AsyncIterator[Rating]:
         for item in sorted(
-            (Rating(game, score) for game, score in self.ratings.items()),
+            (
+                Rating(launcher[game].name, score)
+                for game, score in self.ratings.items()
+            ),
             key=operator.attrgetter("score"),
             reverse=True,
         ):
@@ -182,19 +185,16 @@ class EloRatingSystem:
             for game in available
             for other in available
             if game != other
-            and frozenset({game.folder_name, other.folder_name})
-            not in self.planned_pairs
+            and frozenset({game.id, other.id}) not in self.planned_pairs
         ]
         if not game_pairs:
             return []
         game_pairs.sort(
-            key=lambda pair: self.pair_likelihood(
-                pair[0].folder_name, pair[1].folder_name
-            ),
+            key=lambda pair: self.pair_likelihood(pair[0].id, pair[1].id),
             reverse=True,
         )
         self.planned_pairs.update(
-            frozenset({game_pair[0].folder_name, game_pair[1].folder_name})
+            frozenset({game_pair[0].id, game_pair[1].id})
             for game_pair in game_pairs[: capacity // 2]
         )
         return [game for pair in game_pairs[: capacity // 2] for game in pair]
@@ -209,23 +209,17 @@ class EloRatingSystem:
     ) -> list[GameMeta]:
         available = [game for game in launcher.games if game.email != owner]
         for game in available:
-            if owner in [
-                report.author for report in await self.reports.get(game.folder_name)
-            ]:
+            if owner in [report.author for report in await self.reports.get(game.id)]:
                 available.remove(game)
         game_pairs = [
             (game, other) for game in available for other in available if game != other
         ]
         game_pairs.sort(
-            key=lambda pair: self.pair_likelihood(
-                pair[0].folder_name, pair[1].folder_name
-            ),
+            key=lambda pair: self.pair_likelihood(pair[0].id, pair[1].id),
             reverse=True,
         )
         planned_game_pairs = [
-            pair
-            for pair in game_pairs
-            if frozenset({pair[0].folder_name, pair[1].folder_name})
+            pair for pair in game_pairs if frozenset({pair[0].id, pair[1].id})
         ]
         non_planned_game_pairs = [
             pair for pair in game_pairs if pair not in planned_game_pairs
@@ -235,7 +229,7 @@ class EloRatingSystem:
             + non_planned_game_pairs[: capacity // 2 - len(planned_game_pairs)]
         )
         for pair in pairs_to_launch:
-            frozen = frozenset({pair[0].folder_name, pair[1].folder_name})
+            frozen = frozenset({pair[0].id, pair[1].id})
             if frozen in self.planned_pairs:
                 self.planned_pairs.remove(frozen)
         return ([game for pair in pairs_to_launch for game in pair] + launcher.games)[
@@ -245,7 +239,7 @@ class EloRatingSystem:
     async def report(self, game: GameMeta, report: Report) -> int | None:
         if game.email == report.author:
             return None
-        return await self.reports.append(game.folder_name, report)
+        return await self.reports.append(game.id, report)
 
     async def fetch_reports(self, game: str) -> tuple[Report, ...]:
         return await self.reports.get(game)

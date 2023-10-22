@@ -94,6 +94,17 @@ class Launcher:
 
         self.games = self.scan_games()
 
+    def __getitem__(self, game_id: str, /) -> GameMeta:
+        """Get a game by id.
+
+        Args:
+            game_id (str): The id of the game
+        """
+        for game in self.games:
+            if game.id == game_id:
+                return game
+        raise KeyError(game_id)
+
     def scan_games(self) -> list[GameMeta]:
         """Scan the games folder for games."""
         indexes = glob.glob(os.path.join(self.games_path, "*.yaml"))

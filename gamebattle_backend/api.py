@@ -432,7 +432,7 @@ class GamebattleApi:
         return Stats(
             permitted=True,
             started=self.enable_competition,
-            elo=await self.rating_system.score(GameMeta.folder_name_for(owner)),
+            elo=await self.rating_system.score(GameMeta.id_for(owner)),
         )
 
     async def set_preference(
@@ -566,7 +566,7 @@ class GamebattleApi:
                     game.metadata,
                     report,
                     accumulated_reports,
-                    game.metadata.folder_name,
+                    game.metadata.id,
                 )
         except KeyError:
             raise fastapi.HTTPException(
@@ -590,10 +590,10 @@ class GamebattleApi:
             raise fastapi.HTTPException(
                 status_code=400, detail="Competition is not enabled."
             )
-        top_game_authors: list[Rating] = []
-        async for game in self.rating_system.top():
-            top_game_authors.append(game)
-        return top_game_authors
+        top_games: list[Rating] = []
+        async for game in self.rating_system.top(self.launcher):
+            top_games.append(game)
+        return top_games
 
     def __call__(self) -> fastapi.FastAPI:
         """Return the API server."""

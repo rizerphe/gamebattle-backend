@@ -46,3 +46,13 @@ class GameMeta:
     def folder_name(self) -> str:
         """The name of the game's folder"""
         return self.folder_name_for(self.email)
+
+    @property
+    def id(self) -> str:
+        """The id of the game."""
+        return self.folder_name
+
+    @classmethod
+    def id_for(cls, email: str) -> str:
+        """The id of the game."""
+        return cls.folder_name_for(email)
