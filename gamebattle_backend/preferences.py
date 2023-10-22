@@ -79,6 +79,32 @@ class PreferenceStore(Protocol):
         """
 
 
+class ReportStore(Protocol):
+    """A store for reports"""
+
+    def __getitem__(self, key: str, /) -> tuple[Report, ...]:
+        """Get a report.
+
+        Args:
+            key (str): The game name
+        """
+
+    def __setitem__(self, key: str, value: tuple[Report, ...], /) -> None:
+        """Set a report.
+
+        Args:
+            key (str): The game name
+            value (list[Report]): The report
+        """
+
+    def __delitem__(self, key: str, /) -> None:
+        """Delete a report.
+
+        Args:
+            key (str): The game name
+        """
+
+
 class RatingSystem(Protocol):
     """A rating system for games"""
 
@@ -104,13 +130,13 @@ class RatingSystem(Protocol):
 
 
 class EloRatingSystem:
-    def __init__(self, k: float = 32, initial: float = 1000):
+    def __init__(self, reports: ReportStore, k: float = 32, initial: float = 1000):
         self.k = k
         self.initial = initial
         self.ratings: dict[str, float] = {}
         self.runs: dict[str, int] = {}
         self.planned_pairs: set[frozenset[str]] = set()
-        self.reports: dict[str, list[Report]] = {}
+        self.reports: ReportStore = reports
 
     def clear(self) -> None:
         self.ratings.clear()
@@ -186,7 +212,7 @@ class EloRatingSystem:
             for game in launcher.games
             if game.email != owner
             and owner
-            not in [report.author for report in self.reports.get(game.folder_name, [])]
+            not in [report.author for report in self.reports[game.folder_name]]
         ]
         game_pairs = [
             (game, other) for game in available for other in available if game != other
@@ -217,16 +243,14 @@ class EloRatingSystem:
             :capacity
         ]
 
-    def report(self, game: GameMeta, report: Report) -> list[Report] | None:
+    def report(self, game: GameMeta, report: Report) -> tuple[Report, ...] | None:
         if game.email == report.author:
             return None
         if report.session in [
-            report.session for report in self.reports.get(game.folder_name, [])
+            report.session for report in self.reports[game.folder_name]
         ]:
             return None
-        self.reports[game.folder_name] = self.reports.get(game.folder_name, []) + [
-            report
-        ]
+        self.reports[game.folder_name] = self.reports[game.folder_name] + (report,)
         return self.reports[game.folder_name]
 
 

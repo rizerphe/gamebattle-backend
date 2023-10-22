@@ -1,5 +1,6 @@
 """The API server for the application."""
 import asyncio
+from collections import defaultdict
 from dataclasses import dataclass
 import os
 import uuid
@@ -461,7 +462,7 @@ class GamebattleApi:
         self,
         game: GameMeta,
         report: Report,
-        accumulated_reports: list[Report],
+        accumulated_reports: tuple[Report, ...],
     ) -> None:
         if not self.report_webhook:
             return
@@ -570,10 +571,11 @@ class GamebattleApi:
 
 
 def launch_app() -> fastapi.FastAPI:
+    reports: defaultdict[str, tuple[Report, ...]] = defaultdict(tuple)
     return GamebattleApi(
         os.environ["GAMES_PATH"],
         RAMPreferenceStore(),
-        EloRatingSystem(),
+        EloRatingSystem(reports),
         os.environ.get("NETWORK") or None,
         os.environ.get("ENABLE_COMPETITION") == "true",
         os.environ.get("REPORT_WEBHOOK") or None,
