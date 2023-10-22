@@ -1,6 +1,7 @@
 """A session containing two competing games."""
 from __future__ import annotations
 from dataclasses import dataclass, field
+import random
 import time
 from typing import Protocol, TypeVar
 
@@ -61,12 +62,14 @@ class Session:
                 Defaults to launch_randomly.
             capacity (int): The number of games to launch. Defaults to 2.
         """
+        games = [
+            await launcher.start_game(game)
+            for game in await strategy(launcher, capacity, owner)
+        ]
+        random.shuffle(games)
         return Session(
             owner=owner,
-            games=[
-                await launcher.start_game(game)
-                for game in await strategy(launcher, capacity, owner)
-            ],
+            games=games,
         )
 
     def stop(self) -> None:
