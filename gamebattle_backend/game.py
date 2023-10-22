@@ -29,6 +29,7 @@ class Game:
     metadata: GameMeta
     container: Container
     over: bool = False  # TODO: make this more robust to game restarts
+    switching_over_allowed: bool = True
 
     @classmethod
     def start(
@@ -48,7 +49,9 @@ class Game:
 
     def restart(self) -> None:
         """Restart the game."""
+        self.switching_over_allowed = False
         self.container.restart()
+        self.switching_over_allowed = True
 
     def stop(self) -> None:
         """Stop the game."""
@@ -59,7 +62,8 @@ class Game:
         """Return whether the game is running."""
         if self.container.running:
             return True
-        self.over = True
+        if self.switching_over_allowed:
+            self.over = True
         return False
 
     @asynccontextmanager
