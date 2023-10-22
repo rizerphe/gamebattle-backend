@@ -48,6 +48,7 @@ class Stats:
     """The stats of an author."""
 
     permitted: bool
+    started: bool
     elo: float
 
 
@@ -425,6 +426,7 @@ class GamebattleApi:
         """
         return Stats(
             permitted=True,
+            started=self.enable_competition,
             elo=await self.rating_system.score(GameMeta.folder_name_for(owner)),
         )
 
