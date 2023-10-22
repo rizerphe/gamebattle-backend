@@ -55,7 +55,7 @@ async def launch_preloaded(
     return available and random.sample(available, capacity)
 
 
-def launch_own(launcher: Launcher, capacity: int, owner: str) -> list[GameMeta]:
+async def launch_own(launcher: Launcher, capacity: int, owner: str) -> list[GameMeta]:
     """Launch user's own games.
 
     Raises:

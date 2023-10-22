@@ -199,7 +199,7 @@ class GamebattleApi:
                 status_code=400, detail="Too many sessions for user."
             )
 
-    def create_own_session(
+    async def create_own_session(
         self,
         owner: str = fastapi.Depends(firebase_email),
     ) -> uuid.UUID:
@@ -215,9 +215,10 @@ class GamebattleApi:
                 game = session.games[0]
                 if game.metadata.email == owner:
                     self.manager.stop_session(session_id, owner)
-            return self.manager.create_session(
+            session = await self.manager.create_session(
                 owner, launch_strategy=launch_own, capacity=1
-            )[0]
+            )
+            return session[0]
         except TooManySessionsError:
             raise fastapi.HTTPException(
                 status_code=400, detail="Too many sessions for user."
