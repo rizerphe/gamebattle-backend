@@ -446,7 +446,7 @@ class GamebattleApi:
             elo=score,
             max_elo=top[0].score if top else 1,
             place=next(
-                (i + 1 for i, rating in enumerate(top) if score == rating.score),
+                (i + 1 for i, rating in enumerate(top) if score <= rating.score),
                 None,
             ),
             places=len(top) or 1,
