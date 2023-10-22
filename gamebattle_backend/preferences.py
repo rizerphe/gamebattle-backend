@@ -1,8 +1,9 @@
 """A store for game preferences"""
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import operator
-from typing import Iterator, Protocol
+import time
+from typing import AsyncIterator, Protocol
 import uuid
 
 from gamebattle_backend.common import GameMeta
@@ -17,15 +18,18 @@ class Preference:
 
     games: tuple[str, str]
     first_score: float
+    author: str
+    timestamp: float = field(default_factory=time.time)
 
     @classmethod
-    def from_session(cls, session: Session, first_score: float) -> Preference:
+    async def from_session(cls, session: Session, first_score: float) -> Preference:
         return cls(
             (
                 session.games[0].metadata.folder_name,
                 session.games[1].metadata.folder_name,
             ),
             first_score,
+            session.owner,
         )
 
 
@@ -49,14 +53,14 @@ class Report:
 class PreferenceStore(Protocol):
     """A store for game preferences"""
 
-    def __getitem__(self, key: uuid.UUID) -> Preference:
+    async def get(self, key: uuid.UUID) -> Preference | None:
         """Get a preference.
 
         Args:
             key (str): The session id
         """
 
-    def __setitem__(self, key: uuid.UUID, value: Preference) -> None:
+    async def set(self, key: uuid.UUID, value: Preference) -> None:
         """Set a preference.
 
         Args:
@@ -64,14 +68,14 @@ class PreferenceStore(Protocol):
             value (Preference): The preference
         """
 
-    def __delitem__(self, key: uuid.UUID) -> None:
+    async def delete(self, key: uuid.UUID) -> None:
         """Delete a preference.
 
         Args:
             key (str): The session id
         """
 
-    def bind(self, rating_system: RatingSystem) -> None:
+    async def bind(self, rating_system: RatingSystem) -> None:
         """Bind a rating system.
 
         Args:
@@ -82,22 +86,25 @@ class PreferenceStore(Protocol):
 class ReportStore(Protocol):
     """A store for reports"""
 
-    def __getitem__(self, key: str, /) -> tuple[Report, ...]:
+    async def get(self, key: str, /) -> tuple[Report, ...]:
         """Get a report.
 
         Args:
             key (str): The game name
         """
 
-    def __setitem__(self, key: str, value: tuple[Report, ...], /) -> None:
-        """Set a report.
+    async def append(self, key: str, value: Report, /) -> int:
+        """Append a report.
 
         Args:
             key (str): The game name
-            value (list[Report]): The report
+            value (Report): The report
+
+        Returns:
+            int: The new length of the report list
         """
 
-    def __delitem__(self, key: str, /) -> None:
+    async def delete(self, key: str, /) -> None:
         """Delete a report.
 
         Args:
@@ -108,20 +115,20 @@ class ReportStore(Protocol):
 class RatingSystem(Protocol):
     """A rating system for games"""
 
-    def register(self, preference: Preference) -> None:
+    async def register(self, preference: Preference) -> None:
         """Register a preference.
 
         Args:
             preference (Preference): The preference to register
         """
 
-    def clear(self) -> None:
+    async def clear(self) -> None:
         """Clear the rating system."""
 
-    def top(self) -> Iterator[Rating]:
+    def top(self) -> AsyncIterator[Rating]:
         """Get the top games."""
 
-    def score(self, game: str) -> float:
+    async def score(self, game: str) -> float:
         """Get the score of a game.
 
         Args:
@@ -138,11 +145,11 @@ class EloRatingSystem:
         self.planned_pairs: set[frozenset[str]] = set()
         self.reports: ReportStore = reports
 
-    def clear(self) -> None:
+    async def clear(self) -> None:
         self.ratings.clear()
         self.runs.clear()
 
-    def register(self, preference: Preference) -> None:
+    async def register(self, preference: Preference) -> None:
         for game in preference.games:
             if game not in self.ratings:
                 self.ratings[game] = self.initial
@@ -161,19 +168,20 @@ class EloRatingSystem:
     def expected_score(self, game: str, other: str) -> float:
         return 1 / (1 + 10 ** ((self.ratings[other] - self.ratings[game]) / 400))
 
-    def top(self) -> Iterator[Rating]:
-        return iter(
-            sorted(
-                (Rating(game, score) for game, score in self.ratings.items()),
-                key=operator.attrgetter("score"),
-                reverse=True,
-            )
-        )
+    async def top(self) -> AsyncIterator[Rating]:
+        for item in sorted(
+            (Rating(game, score) for game, score in self.ratings.items()),
+            key=operator.attrgetter("score"),
+            reverse=True,
+        ):
+            yield item
 
-    def score(self, game: str) -> float:
-        return self.ratings[game]
+    async def score(self, game: str) -> float:
+        return self.ratings.get(game, self.initial)
 
-    def launch(self, launcher: Launcher, capacity: int, owner: str) -> list[GameMeta]:
+    async def launch(
+        self, launcher: Launcher, capacity: int, owner: str
+    ) -> list[GameMeta]:
         available = [game for game in launcher.games if game.email != owner]
         if capacity % 2:
             capacity += 1
@@ -204,16 +212,15 @@ class EloRatingSystem:
             self.ratings.get(game, self.initial) - self.ratings.get(other, self.initial)
         ) / 200 - (self.runs.get(game, 0) + self.runs.get(other, 0))
 
-    def launch_preloaded(
+    async def launch_preloaded(
         self, launcher: Prelauncher, capacity: int, owner: str
     ) -> list[GameMeta]:
-        available = [
-            game
-            for game in launcher.games
-            if game.email != owner
-            and owner
-            not in [report.author for report in self.reports[game.folder_name]]
-        ]
+        available = [game for game in launcher.games if game.email != owner]
+        for game in available:
+            if owner in [
+                report.author for report in await self.reports.get(game.folder_name)
+            ]:
+                available.remove(game)
         game_pairs = [
             (game, other) for game in available for other in available if game != other
         ]
@@ -243,15 +250,10 @@ class EloRatingSystem:
             :capacity
         ]
 
-    def report(self, game: GameMeta, report: Report) -> tuple[Report, ...] | None:
+    async def report(self, game: GameMeta, report: Report) -> int | None:
         if game.email == report.author:
             return None
-        if report.session in [
-            report.session for report in self.reports[game.folder_name]
-        ]:
-            return None
-        self.reports[game.folder_name] = self.reports[game.folder_name] + (report,)
-        return self.reports[game.folder_name]
+        return await self.reports.append(game.folder_name, report)
 
 
 class RAMPreferenceStore:
@@ -259,32 +261,33 @@ class RAMPreferenceStore:
         self.preferences: dict[uuid.UUID, Preference] = {}
         self.rating_systems: list[RatingSystem] = []
 
-    def __getitem__(self, key: uuid.UUID) -> Preference:
+    async def get(self, key: uuid.UUID) -> Preference | None:
         return self.preferences[key]
 
-    def __setitem__(self, key: uuid.UUID, value: Preference) -> None:
+    async def set(self, key: uuid.UUID, value: Preference) -> None:
         preference_exists = key in self.preferences
         self.preferences[key] = value
         if preference_exists:
-            self.rebuild()
+            await self.rebuild()
         else:
             for rating_system in self.rating_systems:
-                rating_system.register(value)
+                await rating_system.register(value)
 
-    def __delitem__(self, key: uuid.UUID) -> None:
+    async def delete(self, key: uuid.UUID) -> None:
         del self.preferences[key]
-        self.rebuild()
+        await self.rebuild()
 
-    def __iter__(self) -> Iterator[Preference]:
-        return iter(self.preferences.values())
+    async def __aiter__(self) -> AsyncIterator[Preference]:
+        for value in self.preferences.values():
+            yield value
 
-    def bind(self, rating_system: RatingSystem) -> None:
-        for preference in self:
-            rating_system.register(preference)
+    async def bind(self, rating_system: RatingSystem) -> None:
+        async for preference in self:
+            await rating_system.register(preference)
         self.rating_systems.append(rating_system)
 
-    def rebuild(self) -> None:
+    async def rebuild(self) -> None:
         for rating_system in self.rating_systems:
-            rating_system.clear()
-            for preference in self:
-                rating_system.register(preference)
+            await rating_system.clear()
+            async for preference in self:
+                await rating_system.register(preference)

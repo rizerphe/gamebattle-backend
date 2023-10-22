@@ -17,7 +17,9 @@ if TYPE_CHECKING:
     from .session import LaunchStrategy
 
 
-def launch_randomly(launcher: Launcher, capacity: int, owner: str) -> list[GameMeta]:
+async def launch_randomly(
+    launcher: Launcher, capacity: int, owner: str
+) -> list[GameMeta]:
     """Pick N games to launch.
 
     Args:
@@ -29,7 +31,7 @@ def launch_randomly(launcher: Launcher, capacity: int, owner: str) -> list[GameM
     return available and random.sample(available, capacity)
 
 
-def launch_preloaded(
+async def launch_preloaded(
     launcher: Prelauncher, capacity: int, owner: str
 ) -> list[GameMeta]:
     """Pick N games to launch, preferring prelaunched games.
@@ -135,7 +137,7 @@ class Launcher:
             file.write("""COPY . .\n""")
             file.write(f"ENV COMMAND python {game.file}\n")
 
-    def start_game(self, meta: GameMeta) -> Game:
+    async def start_game(self, meta: GameMeta) -> Game:
         """Start a game.
 
         Args:
@@ -338,20 +340,21 @@ class Prelauncher(Launcher):
         self.prelaunch = prelaunch
         self.prelaunched: dict[GameMeta, list[Game]] = {}
         self.prelaunch_strategy = prelaunch_strategy
-        self.prelaunch_games()
 
-    def prelaunch_games(self) -> None:
+    async def prelaunch_games(self) -> None:
         """Prelaunches games."""
         if not self.games:
             return
         n_prelaunched = sum(len(x) for x in self.prelaunched.values())
         if n_prelaunched >= self.prelaunch:
             return
-        for meta in self.prelaunch_strategy(self, self.prelaunch - n_prelaunched, ""):
-            game = super().start_game(meta)
+        for meta in await self.prelaunch_strategy(
+            self, self.prelaunch - n_prelaunched, ""
+        ):
+            game = await super().start_game(meta)
             self.prelaunched.setdefault(meta, []).append(game)
 
-    def start_game(self, meta: GameMeta) -> Game:
+    async def start_game(self, meta: GameMeta) -> Game:
         """Start a game.
 
         Args:
@@ -363,9 +366,9 @@ class Prelauncher(Launcher):
         game = (
             self.prelaunched[meta].pop()
             if meta in self.prelaunched and self.prelaunched[meta]
-            else super().start_game(meta)
+            else await super().start_game(meta)
         )
-        self.prelaunch_games()
+        await self.prelaunch_games()
         return game
 
     def build_game(self, metadata: GameMeta) -> None:

@@ -24,7 +24,7 @@ LauncherType = TypeVar("LauncherType", bound="Launcher")
 class LaunchStrategy(Protocol[LauncherType]):
     """A strategy for picking N games to launch."""
 
-    def __call__(
+    async def __call__(
         self, launcher: LauncherType, capacity: int, owner: str
     ) -> list[GameMeta]:
         """Pick N games to launch.
@@ -45,7 +45,7 @@ class Session:
     launch_time: float = field(default_factory=time.time)
 
     @classmethod
-    def launch(
+    async def launch(
         cls,
         owner: str,
         launcher: LauncherType,
@@ -64,8 +64,8 @@ class Session:
         return Session(
             owner=owner,
             games=[
-                launcher.start_game(game)
-                for game in strategy(launcher, capacity, owner)
+                await launcher.start_game(game)
+                for game in await strategy(launcher, capacity, owner)
             ],
         )
 

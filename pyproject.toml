@@ -18,6 +18,7 @@ firebase-admin = "^6.2.0"
 websockets = "^11.0.3"
 trio = "^0.22.2"
 httpx = "^0.25.0"
+redis = "^5.0.1"
 
 
 [build-system]

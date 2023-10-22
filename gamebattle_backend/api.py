@@ -9,16 +9,18 @@ import fastapi
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 import httpx
+import redis.asyncio as redis
 import websockets
 
+from gamebattle_backend.preference_store_redis import RedisPreferenceStore
 from gamebattle_backend.preferences import (
     EloRatingSystem,
     Preference,
     PreferenceStore,
-    RAMPreferenceStore,
     Rating,
     Report,
 )
+from gamebattle_backend.report_store_redis import RedisReportStore
 
 from .auth import User, verify, verify_user
 from .common import GameMeta
@@ -136,7 +138,6 @@ class GamebattleApi:
         )
         self.manager = Manager(self.launcher)
         self.enable_competition = enable_competition
-        self.preference_store.bind(self.rating_system)
         self.report_webhook = report_webhook
 
     def sessions(
@@ -168,7 +169,9 @@ class GamebattleApi:
         except KeyError:
             raise fastapi.HTTPException(status_code=404, detail="Session not found.")
 
-    def create_session(self, owner: str = fastapi.Depends(firebase_email)) -> uuid.UUID:
+    async def create_session(
+        self, owner: str = fastapi.Depends(firebase_email)
+    ) -> uuid.UUID:
         """Create a session.
 
         Args:
@@ -179,9 +182,10 @@ class GamebattleApi:
                 status_code=400, detail="Competition mode is disabled."
             )
         try:
-            return self.manager.create_session(
+            session = await self.manager.create_session(
                 owner, launch_strategy=self.rating_system.launch_preloaded
-            )[0]
+            )
+            return session[0]
         except TooManySessionsError:
             raise fastapi.HTTPException(
                 status_code=400, detail="Too many sessions for user."
@@ -403,18 +407,21 @@ class GamebattleApi:
         metadata = GameMeta(name, owner.name, file, owner.email)
         self.launcher.build_game(metadata)
 
-    def stats(
+    async def stats(
         self,
         owner: str = fastapi.Depends(firebase_email),
-    ) -> dict[str, int]:
+    ) -> dict[str, bool | float]:
         """Get the stats of the user.
 
         Args:
             owner: The user ID of the session owner.
         """
-        return {"permitted": True}
+        return {
+            "permitted": True,
+            "elo": await self.rating_system.score(GameMeta.folder_name_for(owner)),
+        }
 
-    def set_preference(
+    async def set_preference(
         self,
         session_id: uuid.UUID,
         score_first: float = fastapi.Body(minimum=0, maximum=1, embed=True),
@@ -439,13 +446,13 @@ class GamebattleApi:
             raise fastapi.HTTPException(
                 status_code=400, detail="The session is not over."
             )
-        preference = Preference.from_session(session, score_first)
-        self.preference_store[session_id] = preference
+        preference = await Preference.from_session(session, score_first)
+        await self.preference_store.set(session_id, preference)
 
-    def get_preference(
+    async def get_preference(
         self,
         session_id: uuid.UUID,
-    ) -> PreferenceScore:
+    ) -> PreferenceScore | None:
         """Get the preference of a session.
 
         Args:
@@ -453,16 +460,16 @@ class GamebattleApi:
             player: The user ID of the session owner.
         """
         try:
-            preference = self.preference_store[session_id]
+            preference = await self.preference_store.get(session_id)
         except KeyError:
             raise fastapi.HTTPException(status_code=404, detail="Preference not found.")
-        return PreferenceScore(preference.first_score)
+        return PreferenceScore(preference.first_score) if preference else None
 
     async def _send_report(
         self,
         game: GameMeta,
         report: Report,
-        accumulated_reports: tuple[Report, ...],
+        accumulated_reports: int,
     ) -> None:
         if not self.report_webhook:
             return
@@ -474,6 +481,9 @@ class GamebattleApi:
                         {
                             "title": f"Game reported: {game.name}",
                             "description": report.reason,
+                            "color": (0xFF0000 if report.reason else 0xFFFF00)
+                            if accumulated_reports > 3
+                            else 0x00FF00,
                             "fields": [
                                 {
                                     "name": "Game",
@@ -491,9 +501,7 @@ class GamebattleApi:
                                     "inline": True,
                                 },
                             ],
-                            "footer": {
-                                "text": f"Previous reports: {len(accumulated_reports)}"
-                            },
+                            "footer": {"text": f"Total reports: {accumulated_reports}"},
                         }
                     ],
                 },
@@ -521,7 +529,7 @@ class GamebattleApi:
         try:
             game = self.manager.get_game(owner, session_id, game_id)
             report = Report(session_id, reason, owner)
-            accumulated_reports = self.rating_system.report(game.metadata, report)
+            accumulated_reports = await self.rating_system.report(game.metadata, report)
             if accumulated_reports:
                 await self._send_report(game.metadata, report, accumulated_reports)
         except KeyError:
@@ -529,7 +537,7 @@ class GamebattleApi:
                 status_code=404, detail="Session or game not found."
             )
 
-    def leaderboard(
+    async def leaderboard(
         self,
     ) -> list[Rating]:
         """Get the leaderboard."""
@@ -537,8 +545,10 @@ class GamebattleApi:
             raise fastapi.HTTPException(
                 status_code=400, detail="Competition is not enabled."
             )
-        top_game_authors = self.rating_system.top()
-        return list(top_game_authors)
+        top_game_authors: list[Rating] = []
+        async for game in self.rating_system.top():
+            top_game_authors.append(game)
+        return top_game_authors
 
     def __call__(self) -> fastapi.FastAPI:
         """Return the API server."""
@@ -550,6 +560,8 @@ class GamebattleApi:
             allow_methods=["*"],
             allow_headers=["*"],
         )
+
+        api.on_event("startup")(self.setup)
         api.get("/sessions")(self.sessions)
         api.post("/sessions")(self.create_session)
         api.post("/sessions/own")(self.create_own_session)
@@ -569,13 +581,23 @@ class GamebattleApi:
         api.get("/stats")(self.stats)
         return api
 
+    async def setup(self):
+        """Setup the API server."""
+        await self.launcher.prelaunch_games()
+        await self.preference_store.bind(self.rating_system)
+
 
 def launch_app() -> fastapi.FastAPI:
-    reports: defaultdict[str, tuple[Report, ...]] = defaultdict(tuple)
+    r = redis.Redis(
+        host=os.environ.get("REDIS_HOST") or "localhost",
+        port=int(os.environ.get("REDIS_PORT") or 6379),
+        db=int(os.environ.get("REDIS_DB") or 0),
+        password=os.environ.get("REDIS_PASSWORD") or None,
+    )
     return GamebattleApi(
         os.environ["GAMES_PATH"],
-        RAMPreferenceStore(),
-        EloRatingSystem(reports),
+        RedisPreferenceStore(r),
+        EloRatingSystem(RedisReportStore(r)),
         os.environ.get("NETWORK") or None,
         os.environ.get("ENABLE_COMPETITION") == "true",
         os.environ.get("REPORT_WEBHOOK") or None,

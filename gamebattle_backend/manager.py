@@ -97,7 +97,7 @@ class Manager:
                 if session.owner == user_id
             }
 
-    def create_session(
+    async def create_session(
         self,
         owner: str,
         launch_strategy: LaunchStrategy = launch_randomly,
@@ -116,7 +116,7 @@ class Manager:
         with self.lock:
             if len(self.user_sessions(owner)) >= self.config.max_sessions_per_user:
                 raise TooManySessionsError
-            session = Session.launch(
+            session = await Session.launch(
                 owner, self.launcher, launch_strategy, capacity=capacity
             )
             id_ = uuid.uuid4()
