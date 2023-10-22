@@ -3,12 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import operator
 import time
-from typing import AsyncIterator, Literal, Protocol
+from typing import AsyncIterator, Protocol
 import uuid
 
 from gamebattle_backend.common import GameMeta
 from gamebattle_backend.launcher import Launcher, Prelauncher
 
+from .report import Report
 from .session import Session
 
 
@@ -39,17 +40,6 @@ class Rating:
 
     name: str
     score: float
-
-
-@dataclass
-class Report:
-    """A report"""
-
-    session: uuid.UUID
-    short_reason: Literal["unclear", "buggy", "other"]
-    reason: str
-    output: str
-    author: str
 
 
 class PreferenceStore(Protocol):
@@ -256,6 +246,9 @@ class EloRatingSystem:
         if game.email == report.author:
             return None
         return await self.reports.append(game.folder_name, report)
+
+    async def fetch_reports(self, game: str) -> tuple[Report, ...]:
+        return await self.reports.get(game)
 
 
 class RAMPreferenceStore:

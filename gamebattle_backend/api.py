@@ -8,6 +8,7 @@ import uuid
 import fastapi
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from firebase_admin import json
 import httpx
 import redis.asyncio as redis
 import websockets
@@ -128,6 +129,7 @@ class GamebattleApi:
         network: str | None,
         enable_competition: bool = True,
         report_webhook: str | None = None,
+        admin_emails: list[str] | None = None,
     ) -> None:
         """Initialize the API server.
 
@@ -148,6 +150,7 @@ class GamebattleApi:
         self.manager = Manager(self.launcher)
         self.enable_competition = enable_competition
         self.report_webhook = report_webhook
+        self.admin_emails = admin_emails or []
 
     def sessions(
         self, owner: str = fastapi.Depends(firebase_email)
@@ -481,6 +484,7 @@ class GamebattleApi:
         game: GameMeta,
         report: Report,
         accumulated_reports: int,
+        game_name: str,
     ) -> None:
         if not self.report_webhook:
             return
@@ -516,8 +520,17 @@ class GamebattleApi:
                                     "value": report.short_reason,
                                     "inline": True,
                                 },
+                                {
+                                    "name": "Logs attached",
+                                    "value": "Yes" if report.output else "No",
+                                    "inline": True,
+                                },
                             ],
-                            "footer": {"text": f"Total reports: {accumulated_reports}"},
+                            "footer": {
+                                "text": f"Total reports: {accumulated_reports}",
+                            },
+                            "url": f"https://gamebattle.r1a.nl/report/{game_name}/"
+                            f"{accumulated_reports}",
                         }
                     ],
                 },
@@ -549,11 +562,25 @@ class GamebattleApi:
             report = Report(session_id, short_reason, reason, output, owner)
             accumulated_reports = await self.rating_system.report(game.metadata, report)
             if accumulated_reports:
-                await self._send_report(game.metadata, report, accumulated_reports)
+                await self._send_report(
+                    game.metadata,
+                    report,
+                    accumulated_reports,
+                    game.metadata.folder_name,
+                )
         except KeyError:
             raise fastapi.HTTPException(
                 status_code=404, detail="Session or game not found."
             )
+
+    async def fetch_reports(
+        self,
+        game_id: str,
+        owner: str = fastapi.Depends(firebase_email),
+    ) -> tuple[Report, ...]:
+        if owner not in self.admin_emails:
+            raise fastapi.HTTPException(status_code=403, detail="You are not an admin.")
+        return await self.rating_system.fetch_reports(game_id)
 
     async def leaderboard(
         self,
@@ -588,6 +615,7 @@ class GamebattleApi:
         api.websocket("/sessions/{session_id}/{game_id}/ws")(self.ws)
         api.post("/sessions/{session_id}/{game_id}/restart")(self.restart_game)
         api.post("/sessions/{session_id}/{game_id}/report")(self.report_game)
+        api.get("/reports/{game_id}")(self.fetch_reports)
         api.get("/sessions/{session_id}/preference")(self.get_preference)
         api.post("/sessions/{session_id}/preference")(self.set_preference)
         api.get("/leaderboard")(self.leaderboard)
@@ -619,4 +647,5 @@ def launch_app() -> fastapi.FastAPI:
         os.environ.get("NETWORK") or None,
         os.environ.get("ENABLE_COMPETITION") == "true",
         os.environ.get("REPORT_WEBHOOK") or None,
+        json.loads(os.environ.get("ADMIN_EMAILS") or "[]"),
     )()
