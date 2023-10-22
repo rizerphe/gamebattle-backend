@@ -426,6 +426,10 @@ class GamebattleApi:
             score_first: The score of the first game.
             player: The user ID of the session owner.
         """
+        if not self.enable_competition:
+            raise fastapi.HTTPException(
+                status_code=400, detail="Competition is not enabled."
+            )
         try:
             session = self.manager.get_session(player, session_id)
         except KeyError:
@@ -509,6 +513,10 @@ class GamebattleApi:
             reason: The reason of the report.
             owner: The user ID of the session owner.
         """
+        if not self.enable_competition:
+            raise fastapi.HTTPException(
+                status_code=400, detail="Competition is not enabled."
+            )
         try:
             game = self.manager.get_game(owner, session_id, game_id)
             report = Report(session_id, reason, owner)
@@ -524,6 +532,10 @@ class GamebattleApi:
         self,
     ) -> list[Rating]:
         """Get the leaderboard."""
+        if not self.enable_competition:
+            raise fastapi.HTTPException(
+                status_code=400, detail="Competition is not enabled."
+            )
         top_game_authors = self.rating_system.top()
         return list(top_game_authors)
 
