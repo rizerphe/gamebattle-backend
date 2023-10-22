@@ -1,6 +1,5 @@
 """The API server for the application."""
 import asyncio
-from collections import defaultdict
 from dataclasses import dataclass
 import os
 import uuid
@@ -42,6 +41,14 @@ class File:
 
     path: str
     content: bytes
+
+
+@dataclass
+class Stats:
+    """The stats of an author."""
+
+    permitted: bool
+    elo: float
 
 
 def firebase_email(
@@ -410,16 +417,16 @@ class GamebattleApi:
     async def stats(
         self,
         owner: str = fastapi.Depends(firebase_email),
-    ) -> dict[str, bool | float]:
+    ) -> Stats:
         """Get the stats of the user.
 
         Args:
             owner: The user ID of the session owner.
         """
-        return {
-            "permitted": True,
-            "elo": await self.rating_system.score(GameMeta.folder_name_for(owner)),
-        }
+        return Stats(
+            permitted=True,
+            elo=await self.rating_system.score(GameMeta.folder_name_for(owner)),
+        )
 
     async def set_preference(
         self,
