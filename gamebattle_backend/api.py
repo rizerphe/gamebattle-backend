@@ -54,6 +54,7 @@ class Stats:
     elo: float
     max_elo: float
     place: int | None
+    places: int | None
     accumulation: float
     required_accumulation: float
 
@@ -448,6 +449,7 @@ class GamebattleApi:
                 (i + 1 for i, rating in enumerate(top) if score == rating.score),
                 None,
             ),
+            places=len(top) or 1,
             accumulation=await self.preference_store.accumulation_of_preferences_by(
                 owner
             ),
