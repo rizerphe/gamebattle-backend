@@ -217,6 +217,10 @@ class GamebattleApi:
         Args:
             owner: The user ID of the session owner.
         """
+        if self.enable_competition and owner not in self.admin_emails:
+            raise fastapi.HTTPException(
+                status_code=400, detail="Competition mode is disabled."
+            )
         try:
             for session_id, session in self.manager.user_sessions(owner).items():
                 if len(session.games) != 1:
