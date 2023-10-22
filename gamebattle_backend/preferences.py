@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import operator
 import time
-from typing import AsyncIterator, Protocol
+from typing import AsyncIterator, Literal, Protocol
 import uuid
 
 from gamebattle_backend.common import GameMeta
@@ -46,7 +46,9 @@ class Report:
     """A report"""
 
     session: uuid.UUID
+    short_reason: Literal["unclear", "buggy", "other"]
     reason: str
+    output: str
     author: str
 
 

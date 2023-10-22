@@ -2,6 +2,7 @@
 import asyncio
 from dataclasses import dataclass
 import os
+from typing import Literal
 import uuid
 
 import fastapi
@@ -510,6 +511,11 @@ class GamebattleApi:
                                     "value": report.author,
                                     "inline": True,
                                 },
+                                {
+                                    "name": "Short reason",
+                                    "value": report.short_reason,
+                                    "inline": True,
+                                },
                             ],
                             "footer": {"text": f"Total reports: {accumulated_reports}"},
                         }
@@ -521,7 +527,9 @@ class GamebattleApi:
         self,
         session_id: uuid.UUID,
         game_id: int,
+        short_reason: Literal["unclear", "buggy", "other"] = fastapi.Body(...),
         reason: str = fastapi.Body(embed=True),
+        output: str = fastapi.Body(embed=True),
         owner: str = fastapi.Depends(firebase_email),
     ) -> None:
         """Report a game.
@@ -538,7 +546,7 @@ class GamebattleApi:
             )
         try:
             game = self.manager.get_game(owner, session_id, game_id)
-            report = Report(session_id, reason, owner)
+            report = Report(session_id, short_reason, reason, output, owner)
             accumulated_reports = await self.rating_system.report(game.metadata, report)
             if accumulated_reports:
                 await self._send_report(game.metadata, report, accumulated_reports)
