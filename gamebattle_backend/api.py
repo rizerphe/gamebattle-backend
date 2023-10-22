@@ -52,6 +52,10 @@ class Stats:
     permitted: bool
     started: bool
     elo: float
+    max_elo: float
+    place: int | None
+    accumulation: float
+    required_accumulation: float
 
 
 def firebase_email(
@@ -429,10 +433,25 @@ class GamebattleApi:
         Args:
             owner: The user ID of the session owner.
         """
+        top: list[Rating]
+        if self.enable_competition:
+            top = await self.leaderboard()
+        else:
+            top = []
+        score = await self.rating_system.score(GameMeta.id_for(owner))
         return Stats(
             permitted=True,
             started=self.enable_competition,
-            elo=await self.rating_system.score(GameMeta.id_for(owner)),
+            elo=score,
+            max_elo=top[0].score if top else 1,
+            place=next(
+                (i + 1 for i, rating in enumerate(top) if score == rating.score),
+                None,
+            ),
+            accumulation=await self.preference_store.accumulation_of_preferences_by(
+                owner
+            ),
+            required_accumulation=5,
         )
 
     async def set_preference(

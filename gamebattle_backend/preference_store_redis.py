@@ -40,7 +40,7 @@ class RedisPreferenceStore:
         return Preference(
             games=json.loads(preference_data[0]),
             first_score=json.loads(preference_data[1]),
-            author=preference_data[2],
+            author=preference_data[2].decode("utf-8", errors="ignore"),
             timestamp=json.loads(preference_data[3]),
         )
 
@@ -79,6 +79,20 @@ class RedisPreferenceStore:
         sorted_preferences = await self.sorted_preferences()
         for rating_system in self.rating_systems:
             await self.build_system(sorted_preferences, rating_system)
+
+    async def accumulation_of_preferences_by(
+        self, preference_author_email: str
+    ) -> float:
+        """Get the accumulation of preferences by a user.
+
+        Args:
+            preference_author_email (str): The email of the preference author
+        """
+        n_preferences: float = 0
+        async for preference in self.get_all_preferences():
+            if preference.author == preference_author_email:
+                n_preferences += preference.accummulation
+        return n_preferences
 
     async def bind(self, rating_system: RatingSystem) -> None:
         """Bind a rating system.

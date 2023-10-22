@@ -33,6 +33,10 @@ class Preference:
             session.owner,
         )
 
+    @property
+    def accummulation(self) -> float:
+        return 1
+
 
 @dataclass
 class Rating:
@@ -65,6 +69,15 @@ class PreferenceStore(Protocol):
 
         Args:
             key (str): The session id
+        """
+
+    async def accumulation_of_preferences_by(
+        self, preference_author_email: str
+    ) -> float:
+        """Get the accumulation of preferences by a user.
+
+        Args:
+            preference_author_email (str): The email of the preference author
         """
 
     async def bind(self, rating_system: RatingSystem) -> None:
@@ -150,6 +163,11 @@ class EloRatingSystem:
             actual = preference.first_score if i == 0 else 1 - preference.first_score
             self.ratings[game] += self.k * (actual - expected)
             self.runs[game] = self.runs.get(game, 0) + 1
+
+        min_score = min(self.ratings.values())
+        if min_score < 0:
+            for game in self.ratings:
+                self.ratings[game] -= min_score
 
     def expected(self, preference: Preference) -> tuple[float, float]:
         return (
