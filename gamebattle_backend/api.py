@@ -11,7 +11,6 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from firebase_admin import json
 import httpx
 import redis.asyncio as redis
-import websockets
 
 from gamebattle_backend.game import Game
 from gamebattle_backend.preference_store_redis import RedisPreferenceStore
@@ -735,6 +734,7 @@ class GamebattleApi:
         )
 
         api.on_event("startup")(self.setup)
+        api.on_event("shutdown")(self.shutdown)
         api.get("/sessions")(self.sessions)
         api.post("/sessions")(self.create_session)
         api.post("/sessions/own")(self.create_own_session)
@@ -762,6 +762,11 @@ class GamebattleApi:
         """Setup the API server."""
         await self.launcher.prelaunch_games()
         await self.preference_store.bind(self.rating_system)
+
+    async def shutdown(self):
+        """Shutdown the API server."""
+        for session in self.manager.sessions.values():
+            session.stop()
 
 
 def launch_app() -> fastapi.FastAPI:

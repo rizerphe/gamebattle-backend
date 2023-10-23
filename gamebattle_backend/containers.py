@@ -41,6 +41,7 @@ class Container:
     def __del__(self) -> None:
         """Kill the container when the object is deleted."""
         self.try_kill()
+        self.stdin = None
 
     @classmethod
     def start(
