@@ -37,12 +37,15 @@ class RedisPreferenceStore:
             return None
         if preference_data[3] is None:
             return None
-        return Preference(
-            games=json.loads(preference_data[0]),
-            first_score=json.loads(preference_data[1]),
-            author=preference_data[2].decode("utf-8", errors="ignore"),
-            timestamp=json.loads(preference_data[3]),
-        )
+        try:
+            return Preference(
+                games=json.loads(preference_data[0]),
+                first_score=json.loads(preference_data[1]),
+                author=preference_data[2].decode("utf-8", errors="ignore"),
+                timestamp=json.loads(preference_data[3]),
+            )
+        except json.JSONDecodeError:
+            return None
 
     async def set(self, key: uuid.UUID, value: Preference) -> None:
         """Set a preference.
