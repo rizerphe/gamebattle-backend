@@ -169,7 +169,6 @@ class Container:
         """Kill the container."""
         if self.running:
             self.container.kill("SIGKILL")
-        self.container.remove()
         if self.stdin:
             with contextlib.suppress(OSError):
                 os.close(self.stdin.fileno())
