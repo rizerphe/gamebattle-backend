@@ -78,6 +78,8 @@ class Container:
 
     def start_receive_loop(self) -> None:
         """Start the receive loop."""
+        if self.receive_loop_thread and self.receive_loop_thread.is_alive():
+            return
         self.receive_loop_thread = threading.Thread(
             target=self.receive_loop, daemon=True
         )
@@ -89,7 +91,11 @@ class Container:
             with contextlib.suppress(OSError):
                 if self.stdin:
                     os.close(self.stdin.fileno())
-            self.container.restart(timeout=0)
+            if self.running:
+                self.container.restart()
+            else:
+                self.container.start()
+                self.start_receive_loop()
 
     async def send(self, message: str) -> None:
         """Send a message to the game.
@@ -111,6 +117,8 @@ class Container:
         Returns:
             str: The message received
         """
+        with self.output_queue():
+            self.start_receive_loop()
         if self.container:
             sync_receive = iter(self.output_queue)
             while True:
