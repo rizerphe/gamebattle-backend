@@ -87,17 +87,14 @@ class Launcher:
     def __init__(
         self,
         games_path: str,
-        network: str | None = None,
     ) -> None:
         """Initialize the manager.
 
         Args:
             games_path (str): The path to the games folder
-            network (str | None): The name of the network to use.
         """
         self.client = docker.from_env()
         self.games_path = games_path
-        self.network = network
 
         self.games = self.scan_games()
 
@@ -151,9 +148,9 @@ class Launcher:
             "w",
             encoding="utf-8",
         ) as file:
-            file.write("""FROM rizerphe/gamebattle-launcher:latest\n""")
+            file.write("""FROM python:3.11-alpine\n""")
             file.write("""COPY . .\n""")
-            file.write(f"ENV COMMAND python {game.file}\n")
+            file.write(f'CMD ["python", "{game.file}"]\n')
 
     async def start_game(self, meta: GameMeta) -> Game:
         """Start a game.
@@ -164,7 +161,7 @@ class Launcher:
         Returns:
             Game: The started game
         """
-        return Game.start(meta, self.client, self.network)
+        return Game.start(meta, self.client)
 
     def filename_component_valid(self, component: str, strict: bool = False) -> bool:
         """Check if a file name component is valid.
@@ -343,7 +340,6 @@ class Prelauncher(Launcher):
     def __init__(
         self,
         games_path: str,
-        network: str | None = None,
         prelaunch: int = 3,
         prelaunch_strategy: LaunchStrategy = launch_randomly,
     ) -> None:
@@ -351,10 +347,9 @@ class Prelauncher(Launcher):
 
         Args:
             games_path (str): The path to the games folder
-            network (str | None): The name of the network to use.
             prelaunch (int): The number of games to keep running
         """
-        super().__init__(games_path, network)
+        super().__init__(games_path)
         self.prelaunch = prelaunch
         self.prelaunched: dict[GameMeta, list[Game]] = {}
         self.prelaunch_strategy = prelaunch_strategy

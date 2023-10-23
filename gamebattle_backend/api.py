@@ -13,6 +13,7 @@ import httpx
 import redis.asyncio as redis
 import websockets
 
+from gamebattle_backend.game import Game
 from gamebattle_backend.preference_store_redis import RedisPreferenceStore
 from gamebattle_backend.preferences import (
     EloRatingSystem,
@@ -131,7 +132,6 @@ class GamebattleApi:
         games_path: str,
         preference_store: PreferenceStore,
         rating_system: EloRatingSystem,
-        network: str | None,
         enable_competition: bool = True,
         report_webhook: str | None = None,
         admin_emails: list[str] | None = None,
@@ -140,7 +140,6 @@ class GamebattleApi:
 
         Args:
             games_path: The path to the games directory.
-            network: The docker network to use
             enable_competition: Whether to enable competition mode.
             report_webhook: The webhook to report to.
         """
@@ -148,7 +147,6 @@ class GamebattleApi:
         self.rating_system = rating_system
         self.launcher = Prelauncher(
             games_path,
-            network,
             prelaunch=4 if enable_competition else 0,
             prelaunch_strategy=rating_system.launch,
         )
@@ -302,31 +300,27 @@ class GamebattleApi:
         owner = verify(jwt)
         if owner is None:
             await websocket.close()
+            return
         try:
-            async with self.manager.ws_and_game(session_id, game_id, owner) as (
-                game,
-                game_socket,
-            ):
-                if game_socket is None:
-                    await websocket.send_json({"type": "bye"})
-                    await websocket.close()
-                    return
-                await asyncio.wait(
-                    [
-                        asyncio.create_task(self._ws_send(websocket, game_socket)),
-                        asyncio.create_task(
-                            self._ws_receive(game, websocket, game_socket)
-                        ),
-                    ],
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
+            game = self.manager.get_game(owner, session_id, game_id)
+            if not game.running:
+                await websocket.send_json({"type": "bye"})
+                await websocket.close()
+                return
+            await asyncio.wait(
+                [
+                    asyncio.create_task(self._ws_send(websocket, game)),
+                    asyncio.create_task(self._ws_receive(game, websocket)),
+                ],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
         except KeyError:
             await websocket.close()
 
     async def _ws_send(
         self,
         websocket: fastapi.WebSocket,
-        game_socket: websockets.WebSocketClientProtocol,
+        game: Game,
     ) -> None:
         """Send messages from the websocket to the game.
 
@@ -335,13 +329,12 @@ class GamebattleApi:
             game_socket: The game's websocket.
         """
         async for message in websocket.iter_text():
-            await game_socket.send(message)
+            await game.send(message)
 
     async def _ws_receive(
         self,
-        game: "Game",
+        game: Game,
         websocket: fastapi.WebSocket,
-        game_socket: websockets.WebSocketClientProtocol,
     ) -> None:
         """Receive messages from the game to the websocket.
 
@@ -349,14 +342,12 @@ class GamebattleApi:
             websocket: The websocket.
             game_socket: The game's websocket.
         """
-        try:
-            async for message in game_socket:
-                await websocket.send_json({"type": "stdout", "data": message})
-        except websockets.exceptions.ConnectionClosedError:
-            await asyncio.sleep(0.1)
-            if not game.running:
-                await websocket.send_json({"type": "bye"})
-            await websocket.close()
+        async for message in game.receive():
+            await websocket.send_json({"type": "stdout", "data": message})
+        await asyncio.sleep(0.1)
+        if not game.running:
+            await websocket.send_json({"type": "bye"})
+        await websocket.close()
 
     def add_game_file(
         self,
@@ -784,7 +775,6 @@ def launch_app() -> fastapi.FastAPI:
         os.environ["GAMES_PATH"],
         RedisPreferenceStore(r),
         EloRatingSystem(RedisReportStore(r)),
-        os.environ.get("NETWORK") or None,
         os.environ.get("ENABLE_COMPETITION") == "true",
         os.environ.get("REPORT_WEBHOOK") or None,
         json.loads(os.environ.get("ADMIN_EMAILS") or "[]"),

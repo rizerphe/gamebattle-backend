@@ -1,15 +1,18 @@
 """Manage game docker containers."""
 from __future__ import annotations
 import asyncio
-from contextlib import asynccontextmanager, closing
 import contextlib
 from dataclasses import dataclass, field
-import ipaddress
+import os
+import select
 import socket
+import threading
 import time
+from typing import AsyncIterator
 
 import docker
-import websockets
+
+from gamebattle_backend.mqueue import ClearableMQueue
 
 
 @dataclass
@@ -30,43 +33,20 @@ class Container:
     """A class containing all the info about a container"""
 
     container: docker.models.containers.Container
-    port: int | None = None
+    stdin: socket.socket | None = None
+    output_queue: ClearableMQueue = field(default_factory=ClearableMQueue)
+    receive_loop_thread: threading.Thread | None = None
     start_time: float = field(default_factory=time.time)
-    network: str | None = None
 
     def __del__(self) -> None:
         """Kill the container when the object is deleted."""
-        self.kill()
-
-    @property
-    def net_addr(self) -> str:
-        """Own IP address and port, taking into account the docker network"""
-        if self.network is None:
-            return f"localhost:{self.port}"
-        network = self.container.client.networks.get(self.network)
-        net_address = network.attrs["Containers"][self.container.id]["IPv4Address"]
-        ip = ipaddress.ip_interface(net_address).ip
-        return f"{ip}:{self.port or 8080}"
-
-    @property
-    def logs(self) -> str:
-        """The logs of the server."""
-        return self.container.logs().decode("utf-8")
-
-    @staticmethod
-    def pick_port() -> int:
-        """Pick a random still open port."""
-        with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
-            sock.bind(("", 0))
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            return sock.getsockname()[1]
+        self.try_kill()
 
     @classmethod
     def start(
         cls,
         game: str,
         client: docker.DockerClient,
-        network: str | None = None,
         resource_limits: Limits | None = None,
     ) -> Container:
         """Starts a container for a game.
@@ -74,58 +54,102 @@ class Container:
         Args:
             game (str): The name of the game
             client (docker.DockerClient): The docker client
-            network (str | None): The name of the network to use
             resource_limits (Limits): The resource limits for the container
 
         Returns:
             Container: The container object, running the game
         """
         resource_limits = resource_limits or Limits.default()
-        port = cls.pick_port()
-        container = (
-            client.containers.run(
-                game,
-                detach=True,
-                network=network,
-                cpu_period=50000,
-                cpu_quota=int(50000 * resource_limits.cpu_fraction),
-                mem_limit=f"{resource_limits.memory_mb}m",
-            )
-            if network
-            else client.containers.run(
-                game,
-                detach=True,
-                ports={"8080/tcp": port},
-                cpu_period=50000,
-                cpu_quota=int(50000 * resource_limits.cpu_fraction),
-                mem_limit=f"{resource_limits.memory_mb}m",
-            )
+        # Create container
+        container = client.containers.run(
+            game,
+            detach=True,
+            cpu_period=50000,
+            cpu_quota=int(50000 * resource_limits.cpu_fraction),
+            mem_limit=f"{resource_limits.memory_mb}m",
+            stdin_open=True,
+            tty=True,
+            init=True,
         )
-        return cls(container, 8080 if network else port, network=network)
+        container = cls(container)
+        # Start receiving loop
+        container.start_receive_loop()
+        return container
+
+    def start_receive_loop(self) -> None:
+        """Start the receive loop."""
+        self.receive_loop_thread = threading.Thread(
+            target=self.receive_loop, daemon=True
+        )
+        self.receive_loop_thread.start()
 
     def restart(self) -> None:
         """Restart the container."""
-        self.container.restart(timeout=0)
+        with self.output_queue():
+            with contextlib.suppress(OSError):
+                if self.stdin:
+                    os.close(self.stdin.fileno())
+            self.container.restart(timeout=0)
 
-    @asynccontextmanager
-    async def ws(self, retries: int = 10) -> websockets.WebSocketServerProtocol:
-        """Return a WebSocket stream for the game.
+    async def send(self, message: str) -> None:
+        """Send a message to the game.
 
         Args:
-            retries (int): The number of retries to do
+            message (str): The message to send
         """
-        # We do a couple retries because the server inside the container
-        # might not be ready yet.
-        try:
-            async with websockets.connect(f"ws://{self.net_addr}/ws") as ws:
-                yield ws
-        except (websockets.exceptions.InvalidMessage, OSError):
-            if retries > 0:
-                await asyncio.sleep(1)
-                async with self.ws(retries - 1) as ws:
-                    yield ws
-            else:
-                raise
+        with self.output_queue():
+            if self.stdin is None:
+                return
+            try:
+                os.write(self.stdin.fileno(), message.encode("utf-8"))
+            except OSError:
+                self.stdin = None
+
+    async def receive(self) -> AsyncIterator[str]:
+        """Receive stdout from the game.
+
+        Returns:
+            str: The message received
+        """
+        if self.container:
+            sync_receive = iter(self.output_queue)
+            while True:
+                chunk = await asyncio.get_event_loop().run_in_executor(
+                    None, sync_receive.__next__
+                )
+                if chunk is None:
+                    return
+                yield chunk  # If an exceptions occurs, the lock will be lost
+
+    def receive_loop(self) -> None:
+        """Receive stdout from the game."""
+        if self.container:
+            target = self.output_queue.get_current()
+            while True:
+                try:
+                    sock = self.stdin
+                    if not self.running:
+                        self.output_queue.clear()
+                        return
+                    if sock is None:
+                        sock = self.stdin = self.container.attach_socket(
+                            params={
+                                "stdin": 1,
+                                "stdout": 1,
+                                "stderr": 1,
+                                "stream": 1,
+                            }
+                        )
+                    ready, _, _ = select.select([sock.fileno()], [], [], 5)
+                    if not ready:
+                        continue
+                    line = os.read(sock.fileno(), 1024)
+                    if line:
+                        target.push(line)
+                except OSError:
+                    self.output_queue.clear()
+                    target = self.output_queue.get_current()
+                    self.stdin = None
 
     @property
     def running(self) -> bool:
@@ -135,8 +159,11 @@ class Container:
     def kill(self) -> None:
         """Kill the container."""
         if self.running:
-            self.container.kill()
+            self.container.kill("SIGKILL")
         self.container.remove()
+        if self.stdin:
+            with contextlib.suppress(OSError):
+                os.close(self.stdin.fileno())
 
     def try_kill(self) -> None:
         """Try to kill the container, but don't raise any errors."""
