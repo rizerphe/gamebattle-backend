@@ -25,7 +25,7 @@ class Limits:
     @classmethod
     def default(cls) -> Limits:
         """The default resource limits."""
-        return cls(cpu_fraction=0.1, memory_mb=256)
+        return cls(cpu_fraction=0.1, memory_mb=40)
 
 
 @dataclass
