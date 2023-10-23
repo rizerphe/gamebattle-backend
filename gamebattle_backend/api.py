@@ -767,6 +767,9 @@ class GamebattleApi:
         """Shutdown the API server."""
         for session in self.manager.sessions.values():
             session.stop()
+        for games in self.launcher.prelaunched.values():
+            for game in games:
+                game.stop()
 
 
 def launch_app() -> fastapi.FastAPI:
