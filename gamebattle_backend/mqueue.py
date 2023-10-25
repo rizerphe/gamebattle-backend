@@ -38,14 +38,12 @@ class MQueue:
                 new_cursor = len(self._data)
                 while new_cursor > cursor:
                     try:
-                        self._data[cursor:new_cursor].decode("utf-8")
                         break
                     except UnicodeDecodeError:
                         new_cursor -= 1
                 if new_cursor > cursor:
-                    next_chunk = self._data[cursor:new_cursor].decode("utf-8")
                     self._condition.release()
-                    yield next_chunk
+                    yield self._data[cursor:new_cursor].decode("utf-8")
                     self._condition.acquire()
                     cursor = new_cursor
                 else:
