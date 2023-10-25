@@ -29,10 +29,10 @@ class RedisReportStore:
         return tuple(
             Report(
                 session=uuid.UUID(report["session"]),
-                short_reason=report.get("short_reason", "other"),
-                reason=report.get("reason", ""),
-                output=report.get("output", ""),
-                author=report.get("author", "unknown"),
+                short_reason=report["short_reason"],
+                reason=report["reason"],
+                output=report["output"],
+                author=report["author"],
             )
             for report in map(json.loads, report_data)
         )
