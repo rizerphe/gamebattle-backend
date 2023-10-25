@@ -242,12 +242,8 @@ class EloRatingSystem:
         planned_game_pairs = [
             pair for pair in game_pairs if frozenset({pair[0].id, pair[1].id})
         ]
-        non_planned_game_pairs = [
-            pair for pair in game_pairs if pair not in planned_game_pairs
-        ]
         pairs_to_launch = (
-            planned_game_pairs
-            + non_planned_game_pairs[: capacity // 2 - len(planned_game_pairs)]
+            planned_game_pairs + game_pairs[: capacity // 2 - len(planned_game_pairs)]
         )
         for pair in pairs_to_launch:
             frozen = frozenset({pair[0].id, pair[1].id})
