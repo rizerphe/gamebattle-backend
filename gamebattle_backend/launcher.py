@@ -149,7 +149,6 @@ class Launcher:
             encoding="utf-8",
         ) as file:
             file.write("""FROM python:3.11-alpine\n""")
-            file.write("""WORKDIR /usr/src/app\n""")
             file.write("""COPY . .\n""")
             file.write(f'CMD ["python", "{game.file}"]\n')
 
