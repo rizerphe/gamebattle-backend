@@ -1,8 +1,11 @@
 """This module contains the game class,
 responsible for managing a game's metadata."""
 from __future__ import annotations
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import AsyncIterator, TYPE_CHECKING
+from typing import TYPE_CHECKING
+
+import websockets
 
 from .common import GameMeta
 from .containers import Container
@@ -29,16 +32,19 @@ class Game:
     switching_over_allowed: bool = True
 
     @classmethod
-    def start(cls, meta: GameMeta, client: DockerClient) -> Game:
+    def start(
+        cls, meta: GameMeta, client: DockerClient, network: str | None = None
+    ) -> Game:
         """Start a game.
 
         Args:
             meta (GameMeta): The metadata of the game
             client (DockerClient): The docker client to use
+            network (str | None): The name of the network to use.
         """
         return Game(
             metadata=meta,
-            container=Container.start(meta.container_name, client),
+            container=Container.start(meta.container_name, client, network),
         )
 
     def restart(self) -> None:
@@ -60,14 +66,13 @@ class Game:
             self.over = True
         return False
 
-    async def send(self, messsage: str) -> None:
-        """Send a message to the game."""
-        await self.container.send(messsage)
-
-    async def receive(self) -> AsyncIterator[str]:
-        """Receive a message from the game."""
-        async for message in self.container.receive():
-            yield message
+    @asynccontextmanager
+    async def ws(self) -> websockets.WebSocketServerProtocol:
+        """Return a WebSocket stream for the game."""
+        if not self.running:
+            yield None
+        async with self.container.ws() as ws:
+            yield ws
 
     @property
     def public(self) -> GamePublic:
