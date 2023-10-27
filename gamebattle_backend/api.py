@@ -2,17 +2,15 @@
 import asyncio
 from dataclasses import dataclass
 import os
-from typing import Literal
+from typing import Coroutine, Literal
 import uuid
+
+import redis.asyncio as redis
 
 import fastapi
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from firebase_admin import json
-import httpx
-import redis.asyncio as redis
-import websockets
-
 from gamebattle_backend.preference_store_redis import RedisPreferenceStore
 from gamebattle_backend.preferences import (
     EloRatingSystem,
@@ -22,6 +20,8 @@ from gamebattle_backend.preferences import (
     Report,
 )
 from gamebattle_backend.report_store_redis import RedisReportStore
+import httpx
+import websockets
 
 from .auth import User, verify, verify_user
 from .common import GameMeta
@@ -680,6 +680,7 @@ class GamebattleApi:
         short_reason: Literal["unclear", "buggy", "other"] = fastapi.Body(...),
         reason: str = fastapi.Body(embed=True),
         output: str = fastapi.Body(embed=True),
+        restart_game: bool = fastapi.Body(False, embed=True),
         owner: str = fastapi.Depends(firebase_email),
     ) -> None:
         """Report a game.
@@ -688,6 +689,8 @@ class GamebattleApi:
             session_id: The session ID.
             game_id: The game ID.
             reason: The reason of the report.
+            output: The output of the game.
+            restart_game: Whether to restart the game.
             owner: The user ID of the session owner.
         """
         if not self.enable_competition:
@@ -695,16 +698,33 @@ class GamebattleApi:
                 status_code=400, detail="Competition is not enabled."
             )
         try:
+            tasks: list[Coroutine] = []
+            if restart_game:
+                rating = await self.preference_store.get(session_id)
+                if rating is not None:
+                    return
+                session = self.manager.get_session(owner, session_id)
+                tasks.append(
+                    session.replace_game(
+                        game_id,
+                        owner,
+                        self.launcher,
+                        self.rating_system.launch_preloaded,
+                    )
+                )
             game = self.manager.get_game(owner, session_id, game_id)
             report = Report(session_id, short_reason, reason, output, owner)
             accumulated_reports = await self.rating_system.report(game.metadata, report)
             if accumulated_reports:
-                await self._send_report(
-                    game.metadata,
-                    report,
-                    accumulated_reports,
-                    game.metadata.id,
+                tasks.append(
+                    self._send_report(
+                        game.metadata,
+                        report,
+                        accumulated_reports,
+                        game.metadata.id,
+                    )
                 )
+            await asyncio.gather(*tasks)
         except KeyError:
             raise fastapi.HTTPException(
                 status_code=404, detail="Session or game not found."

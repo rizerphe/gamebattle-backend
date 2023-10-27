@@ -90,3 +90,23 @@ class Session:
             launch_time=self.launch_time,
             games=[game.public for game in self.games],
         )
+
+    async def replace_game(
+        self,
+        game_id: int,
+        owner: str,
+        launcher: LauncherType,
+        strategy: LaunchStrategy[LauncherType] = launch_randomly,
+    ) -> None:
+        """Replace a game in the session.
+
+        Args:
+            game_id (int): The id of the game to replace
+            owner (str): The owner of the session
+            launcher (LauncherType): The launcher to use
+            strategy (LaunchStrategy): The strategy to use to pick a game.
+        """
+        self.games[game_id].stop()
+        self.games[game_id] = await launcher.start_game(
+            (await strategy(launcher, 1, owner))[0]
+        )
