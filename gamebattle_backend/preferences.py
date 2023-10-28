@@ -2,6 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 import operator
+import random
 import time
 from typing import AsyncIterator, Protocol
 import uuid
@@ -226,6 +227,7 @@ class EloRatingSystem:
         self, launcher: Prelauncher, capacity: int, owner: str
     ) -> list[GameMeta]:
         available = [game for game in launcher.games if game.email != owner]
+        random.shuffle(available)
         for game in available:
             if owner in [report.author for report in await self.reports.get(game.id)]:
                 available.remove(game)
