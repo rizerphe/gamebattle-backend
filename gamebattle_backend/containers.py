@@ -31,8 +31,8 @@ class Container:
     """A class containing all the info about a container"""
 
     container: docker.models.containers.Container
-    stdin_fd: int
-    stdout_fd: int
+    stdin_path: str
+    stdout_path: str
     attached: AttachedInstance | None = None
     start_time: float = field(default_factory=time.time)
 
@@ -58,35 +58,12 @@ class Container:
             Container: The container object, running the game
         """
         resource_limits = resource_limits or Limits.default()
-        mounts: list[docker.types.Mount] = []
-        stdin_fd: int | None = None
-        stdout_fd: int | None = None
-        # If we are the root user:
-        if os.getuid() == 0:
-            # Create FIFO pair for stdio
-            tmpdir = tempfile.mkdtemp()
-            stdin_path = f"{tmpdir}/stdin"
-            stdout_path = f"{tmpdir}/stdout"
-            os.mkfifo(stdin_path)
-            os.mkfifo(stdout_path)
-            stdin_fd = os.open(stdin_path, os.O_RDWR)
-            stdout_fd = os.open(stdout_path, os.O_RDWR)
-            mounts.append(
-                docker.types.Mount(
-                    type="bind",
-                    source=stdin_path,
-                    target="/dev/game_stdin",
-                    read_only=False,
-                )
-            )
-            mounts.append(
-                docker.types.Mount(
-                    type="bind",
-                    source=stdout_path,
-                    target="/dev/game_stdout",
-                    read_only=False,
-                )
-            )
+        # Create FIFO pair for stdio
+        tmpdir = tempfile.mkdtemp()
+        stdin_path = f"{tmpdir}/stdin"
+        stdout_path = f"{tmpdir}/stdout"
+        os.mkfifo(stdin_path)
+        os.mkfifo(stdout_path)
         # Create container
         container = client.containers.create(
             game,
@@ -95,17 +72,22 @@ class Container:
             cpu_quota=int(50000 * resource_limits.cpu_fraction),
             mem_limit=f"{resource_limits.memory_mb}m",
             init=True,
-            mounts=mounts,
+            mounts=[
+                docker.types.Mount(
+                    type="bind",
+                    source=stdin_path,
+                    target="/dev/game_stdin",
+                    read_only=False,
+                ),
+                docker.types.Mount(
+                    type="bind",
+                    source=stdout_path,
+                    target="/dev/game_stdout",
+                    read_only=False,
+                ),
+            ],
         )
-        if stdin_fd and stdout_fd:
-            return cls(container, stdin_fd=stdin_fd, stdout_fd=stdout_fd)
-        # Non-root user - this will do, although it's not ideal
-        sock = container.attach_socket(params={"stdin": 1, "stdout": 1, "stream": 1})
-        return cls(
-            container,
-            stdin_fd=sock.fileno(),
-            stdout_fd=sock.fileno(),
-        )
+        return cls(container, stdin_path, stdout_path)
 
     def restart(self) -> None:
         """Restart the container."""
@@ -114,7 +96,9 @@ class Container:
         self.kill()
         if self.attached is not None:
             self.attached = AttachedInstance(
-                self.container, self.stdin_fd, self.stdout_fd
+                self.container,
+                os.open(self.stdin_path, os.O_RDWR),
+                os.open(self.stdout_path, os.O_RDWR),
             )
             self.attached.start()
 
@@ -136,7 +120,9 @@ class Container:
         """
         if self.attached is None:
             self.attached = AttachedInstance(
-                self.container, self.stdin_fd, self.stdout_fd
+                self.container,
+                os.open(self.stdin_path, os.O_RDWR),
+                os.open(self.stdout_path, os.O_RDWR),
             )
             self.attached.start()
         async for data in self.attached:

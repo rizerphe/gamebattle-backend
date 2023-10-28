@@ -1,6 +1,7 @@
 """A class representing a single object attached to a container's output."""
 from __future__ import annotations
 import asyncio
+import contextlib
 import os
 import select
 import socket
@@ -81,20 +82,24 @@ class AttachedInstance:
                     self.new_data.notify_all()
             except OSError:
                 with self.new_data:
-                    os.close(self.stdin)
                     self.closed = True
                     self.new_data.notify_all()
 
     def wait_for_exit(self) -> None:
         self.container.wait()
         self.closed = True
+        with contextlib.suppress(OSError):
+            os.close(self.stdout)
+            os.close(self.stdin)
         with self.new_data:
             self.new_data.notify_all()
 
     def close(self) -> None:
         with self.new_data:
             self.closed = True
-            os.close(self.stdout)
+            with contextlib.suppress(OSError):
+                os.close(self.stdout)
+                os.close(self.stdin)
             self.new_data.notify_all()
         self.container.wait()
 

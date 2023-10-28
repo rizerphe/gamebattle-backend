@@ -153,9 +153,9 @@ class Launcher:
             file.write("""COPY . .\n""")
             file.write("""ENV PYTHONUNBUFFERED=1\n""")
             file.write(
-                'CMD ["sh", "-c", "cat /dev/game_stdin | '
-                f'python {game.file}'
-                ' > /dev/game_stdout"]\n'
+                f'CMD ["sh", "-c", "python {game.file}'
+                " > /dev/game_stdout"
+                ' < /dev/game_stdin"]\n'
             )
 
     async def start_game(self, meta: GameMeta) -> Game:
