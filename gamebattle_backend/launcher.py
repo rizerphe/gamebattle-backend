@@ -151,7 +151,12 @@ class Launcher:
             file.write("""FROM python:3.11-alpine\n""")
             file.write("""WORKDIR /usr/src/app\n""")
             file.write("""COPY . .\n""")
-            file.write(f'CMD ["python", "{game.file}"]\n')
+            file.write("""ENV PYTHONUNBUFFERED=1\n""")
+            file.write(
+                'CMD ["sh", "-c", "cat /dev/game_stdin | '
+                f'python {game.file}'
+                ' > /dev/game_stdout"]\n'
+            )
 
     async def start_game(self, meta: GameMeta) -> Game:
         """Start a game.

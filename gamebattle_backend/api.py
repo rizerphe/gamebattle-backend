@@ -5,13 +5,12 @@ import os
 from typing import Literal
 import uuid
 
+import redis.asyncio as redis
+
 import fastapi
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from firebase_admin import json
-import httpx
-import redis.asyncio as redis
-
 from gamebattle_backend.game import Game
 from gamebattle_backend.preference_store_redis import RedisPreferenceStore
 from gamebattle_backend.preferences import (
@@ -22,6 +21,7 @@ from gamebattle_backend.preferences import (
     Report,
 )
 from gamebattle_backend.report_store_redis import RedisReportStore
+import httpx
 
 from .auth import User, verify, verify_user
 from .common import GameMeta

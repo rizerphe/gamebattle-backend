@@ -1,18 +1,16 @@
 """Manage game docker containers."""
 from __future__ import annotations
-import asyncio
 import contextlib
 from dataclasses import dataclass, field
 import os
-import select
-import socket
-import threading
+from pwd import getpwnam
 import time
 from typing import AsyncIterator
 
 import docker
+from docker.utils.build import tempfile
 
-from gamebattle_backend.mqueue import ClearableMQueue
+from gamebattle_backend.container_attached import AttachedInstance
 
 
 @dataclass
@@ -33,15 +31,14 @@ class Container:
     """A class containing all the info about a container"""
 
     container: docker.models.containers.Container
-    stdin: socket.socket | None = None
-    output_queue: ClearableMQueue = field(default_factory=ClearableMQueue)
-    receive_loop_thread: threading.Thread | None = None
+    stdin_fd: int
+    stdout_fd: int
+    attached: AttachedInstance | None = None
     start_time: float = field(default_factory=time.time)
 
     def __del__(self) -> None:
         """Kill the container when the object is deleted."""
         self.try_kill()
-        self.stdin = None
 
     @classmethod
     def start(
@@ -61,42 +58,65 @@ class Container:
             Container: The container object, running the game
         """
         resource_limits = resource_limits or Limits.default()
+        mounts: list[docker.types.Mount] = []
+        stdin_fd: int | None = None
+        stdout_fd: int | None = None
+        # If we are the root user:
+        if os.getuid() == 0:
+            # Create FIFO pair for stdio
+            tmpdir = tempfile.mkdtemp()
+            stdin_path = f"{tmpdir}/stdin"
+            stdout_path = f"{tmpdir}/stdout"
+            os.mkfifo(stdin_path)
+            os.mkfifo(stdout_path)
+            stdin_fd = os.open(stdin_path, os.O_RDWR)
+            stdout_fd = os.open(stdout_path, os.O_RDWR)
+            mounts.append(
+                docker.types.Mount(
+                    type="bind",
+                    source=stdin_path,
+                    target="/dev/game_stdin",
+                    read_only=False,
+                )
+            )
+            mounts.append(
+                docker.types.Mount(
+                    type="bind",
+                    source=stdout_path,
+                    target="/dev/game_stdout",
+                    read_only=False,
+                )
+            )
         # Create container
-        container = client.containers.run(
+        container = client.containers.create(
             game,
             detach=True,
             cpu_period=50000,
             cpu_quota=int(50000 * resource_limits.cpu_fraction),
             mem_limit=f"{resource_limits.memory_mb}m",
-            stdin_open=True,
-            tty=True,
             init=True,
+            mounts=mounts,
         )
-        container = cls(container)
-        # Start receiving loop
-        container.start_receive_loop()
-        return container
-
-    def start_receive_loop(self) -> None:
-        """Start the receive loop."""
-        if self.receive_loop_thread and self.receive_loop_thread.is_alive():
-            return
-        self.receive_loop_thread = threading.Thread(
-            target=self.receive_loop, daemon=True
+        if stdin_fd and stdout_fd:
+            return cls(container, stdin_fd=stdin_fd, stdout_fd=stdout_fd)
+        # Non-root user - this will do, although it's not ideal
+        sock = container.attach_socket(params={"stdin": 1, "stdout": 1, "stream": 1})
+        return cls(
+            container,
+            stdin_fd=sock.fileno(),
+            stdout_fd=sock.fileno(),
         )
-        self.receive_loop_thread.start()
 
     def restart(self) -> None:
         """Restart the container."""
-        with self.output_queue():
-            with contextlib.suppress(OSError):
-                if self.stdin:
-                    os.close(self.stdin.fileno())
-            if self.running:
-                self.container.restart()
-            else:
-                self.container.start()
-                self.start_receive_loop()
+        if self.attached is not None:
+            self.attached.close()
+        self.kill()
+        if self.attached is not None:
+            self.attached = AttachedInstance(
+                self.container, self.stdin_fd, self.stdout_fd
+            )
+            self.attached.start()
 
     async def send(self, message: str) -> None:
         """Send a message to the game.
@@ -104,13 +124,9 @@ class Container:
         Args:
             message (str): The message to send
         """
-        with self.output_queue():
-            if self.stdin is None:
-                return
-            try:
-                os.write(self.stdin.fileno(), message.encode("utf-8"))
-            except OSError:
-                self.stdin = None
+        if self.attached is None:
+            return
+        self.attached.send(message)
 
     async def receive(self) -> AsyncIterator[str]:
         """Receive stdout from the game.
@@ -118,47 +134,13 @@ class Container:
         Returns:
             str: The message received
         """
-        with self.output_queue():
-            self.start_receive_loop()
-        if self.container:
-            sync_receive = iter(self.output_queue)
-            while True:
-                chunk = await asyncio.get_event_loop().run_in_executor(
-                    None, sync_receive.__next__
-                )
-                if chunk is None:
-                    return
-                yield chunk  # If an exceptions occurs, the lock will be lost
-
-    def receive_loop(self) -> None:
-        """Receive stdout from the game."""
-        if self.container:
-            target = self.output_queue.get_current()
-            while True:
-                try:
-                    sock = self.stdin
-                    if not self.running:
-                        self.output_queue.clear()
-                        return
-                    if sock is None:
-                        sock = self.stdin = self.container.attach_socket(
-                            params={
-                                "stdin": 1,
-                                "stdout": 1,
-                                "stderr": 1,
-                                "stream": 1,
-                            }
-                        )
-                    ready, _, _ = select.select([sock.fileno()], [], [], 5)
-                    if not ready:
-                        continue
-                    line = os.read(sock.fileno(), 1024)
-                    if line:
-                        target.push(line)
-                except OSError:
-                    self.output_queue.clear()
-                    target = self.output_queue.get_current()
-                    self.stdin = None
+        if self.attached is None:
+            self.attached = AttachedInstance(
+                self.container, self.stdin_fd, self.stdout_fd
+            )
+            self.attached.start()
+        async for data in self.attached:
+            yield data
 
     @property
     def running(self) -> bool:
@@ -169,9 +151,8 @@ class Container:
         """Kill the container."""
         if self.running:
             self.container.kill("SIGKILL")
-        if self.stdin:
-            with contextlib.suppress(OSError):
-                os.close(self.stdin.fileno())
+            if self.attached is not None:
+                self.attached.close()
 
     def try_kill(self) -> None:
         """Try to kill the container, but don't raise any errors."""
