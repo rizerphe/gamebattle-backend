@@ -5,12 +5,13 @@ import os
 from typing import Coroutine, Literal
 import uuid
 
-import redis.asyncio as redis
-
 import fastapi
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from firebase_admin import json
+import httpx
+import redis.asyncio as redis
+
 from gamebattle_backend.preference_store_redis import RedisPreferenceStore
 from gamebattle_backend.preferences import (
     EloRatingSystem,
@@ -20,7 +21,6 @@ from gamebattle_backend.preferences import (
     Report,
 )
 from gamebattle_backend.report_store_redis import RedisReportStore
-import httpx
 
 from .auth import User, verify, verify_user
 from .common import GameMeta
@@ -552,7 +552,7 @@ class GamebattleApi:
             elo=score,
             max_elo=top[0].score if top else 1,
             place=next(
-                (i + 1 for i, rating in enumerate(top) if score <= rating.score),
+                (i + 1 for i, rating in enumerate(top) if score >= rating.score),
                 None,
             ),
             places=len(top) or 1,
