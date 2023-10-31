@@ -57,6 +57,7 @@ class Stats:
     places: int | None
     accumulation: float
     required_accumulation: float
+    reports: int
 
 
 def firebase_email(
@@ -546,6 +547,7 @@ class GamebattleApi:
         else:
             top = []
         score = await self.rating_system.score(GameMeta.id_for(owner))
+        reports = await self.rating_system.fetch_reports(GameMeta.id_for(owner))
         return Stats(
             permitted=True,
             started=self.enable_competition,
@@ -560,6 +562,53 @@ class GamebattleApi:
                 owner
             ),
             required_accumulation=5,
+            reports=len(reports),
+        )
+
+    async def admin_stats(
+        self,
+        game_id: str,
+        owner: str = fastapi.Depends(firebase_email),
+    ) -> Stats:
+        if owner not in self.admin_emails:
+            raise fastapi.HTTPException(
+                status_code=400, detail="Cannot specify game ID."
+            )
+        game_owner = self.launcher[game_id].email
+        top = await self.leaderboard()
+        score = await self.rating_system.score(game_id)
+        reports = await self.rating_system.fetch_reports(game_id)
+        return Stats(
+            permitted=True,
+            started=self.enable_competition,
+            elo=score,
+            max_elo=top[0].score if top else 1,
+            place=next(
+                (i + 1 for i, rating in enumerate(top) if score >= rating.score),
+                None,
+            ),
+            places=len(top) or 1,
+            accumulation=await self.preference_store.accumulation_of_preferences_by(
+                game_owner
+            ),
+            required_accumulation=5,
+            reports=len(reports),
+        )
+
+    async def admin_allstats(
+        self,
+        owner: str = fastapi.Depends(firebase_email),
+    ) -> list[tuple[GameMeta, Stats]]:
+        if owner not in self.admin_emails:
+            raise fastapi.HTTPException(
+                status_code=400, detail="Cannot specify game ID."
+            )
+        return sorted(
+            [
+                (game_meta, await self.admin_stats(game_meta.id, owner))
+                for game_meta in self.launcher.games
+            ],
+            key=lambda x: x[0].author,
         )
 
     async def set_preference(
@@ -776,6 +825,8 @@ class GamebattleApi:
         api.get("/admin/game/{game_id}/meta")(self.admin_get_game_metadata)
         api.post("/game/build")(self.build_game)
         api.get("/stats")(self.stats)
+        api.get("/stats/{game_id}")(self.admin_stats)
+        api.get("/allstats")(self.admin_allstats)
         return api
 
     async def setup(self):
