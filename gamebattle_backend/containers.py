@@ -3,7 +3,6 @@ from __future__ import annotations
 import contextlib
 from dataclasses import dataclass, field
 import os
-from pwd import getpwnam
 import time
 from typing import AsyncIterator
 
@@ -23,7 +22,7 @@ class Limits:
     @classmethod
     def default(cls) -> Limits:
         """The default resource limits."""
-        return cls(cpu_fraction=0.1, memory_mb=40)
+        return cls(cpu_fraction=0.01, memory_mb=40)
 
 
 @dataclass
