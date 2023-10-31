@@ -541,11 +541,7 @@ class GamebattleApi:
         Args:
             owner: The user ID of the session owner.
         """
-        top: list[Rating]
-        if self.enable_competition:
-            top = await self.leaderboard()
-        else:
-            top = []
+        top = await self.leaderboard()
         score = await self.rating_system.score(GameMeta.id_for(owner))
         reports = await self.rating_system.fetch_reports(GameMeta.id_for(owner))
         return Stats(
