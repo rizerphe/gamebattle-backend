@@ -72,10 +72,10 @@ class Session:
             games=games,
         )
 
-    def stop(self) -> None:
+    async def stop(self) -> None:
         """Stop the session."""
         for game in self.games:
-            game.stop()
+            await game.stop()
 
     @property
     def over(self) -> bool:
@@ -106,7 +106,7 @@ class Session:
             launcher (LauncherType): The launcher to use
             strategy (LaunchStrategy): The strategy to use to pick a game.
         """
-        self.games[game_id].stop()
+        await self.games[game_id].stop()
         self.games[game_id] = await launcher.start_game(
             (await strategy(launcher, 1, owner))[0]
         )

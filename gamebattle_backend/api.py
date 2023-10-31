@@ -229,7 +229,7 @@ class GamebattleApi:
             for session_id, session in self.manager.user_sessions(owner).items():
                 if len(session.games) != 1 and owner not in self.admin_emails:
                     continue
-                self.manager.stop_session(session_id, owner)
+                await self.manager.stop_session(session_id, owner)
             session = await self.manager.create_session(
                 owner,
                 launch_strategy=launch_own
@@ -245,7 +245,7 @@ class GamebattleApi:
         except ValueError:
             raise fastapi.HTTPException(status_code=400, detail="No games available.")
 
-    def stop_session(
+    async def stop_session(
         self,
         session_id: uuid.UUID,
         owner: str = fastapi.Depends(firebase_email),
@@ -257,11 +257,11 @@ class GamebattleApi:
             owner: The user ID of the session owner.
         """
         try:
-            self.manager.stop_session(session_id, owner)
+            await self.manager.stop_session(session_id, owner)
         except KeyError:
             raise fastapi.HTTPException(status_code=404, detail="Session not found.")
 
-    def restart_game(
+    async def restart_game(
         self,
         session_id: uuid.UUID,
         game_id: int,
@@ -275,7 +275,7 @@ class GamebattleApi:
             owner: The user ID of the session owner.
         """
         try:
-            self.manager.get_game(owner, session_id, game_id).restart()
+            await self.manager.get_game(owner, session_id, game_id).restart()
         except KeyError:
             raise fastapi.HTTPException(
                 status_code=404, detail="Session or game not found."
@@ -837,10 +837,10 @@ class GamebattleApi:
     async def shutdown(self):
         """Shutdown the API server."""
         for session in self.manager.sessions.values():
-            session.stop()
+            await session.stop()
         for games in self.launcher.prelaunched.values():
             for game in games:
-                game.stop()
+                await game.stop()
 
 
 def launch_app() -> fastapi.FastAPI:

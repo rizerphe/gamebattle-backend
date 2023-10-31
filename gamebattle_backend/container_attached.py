@@ -4,7 +4,6 @@ import asyncio
 import contextlib
 import os
 import select
-import socket
 import threading
 import time
 from typing import Generic, Iterable, Iterator, TypeVar

@@ -1,6 +1,7 @@
 """This module contains the game class,
 responsible for managing a game's metadata."""
 from __future__ import annotations
+import asyncio
 from dataclasses import dataclass
 from typing import AsyncIterator, TYPE_CHECKING
 
@@ -29,27 +30,27 @@ class Game:
     switching_over_allowed: bool = True
 
     @classmethod
-    def start(cls, meta: GameMeta, client: DockerClient) -> Game:
+    async def start(cls, meta: GameMeta, client: DockerClient) -> Game:
         """Start a game.
 
         Args:
             meta (GameMeta): The metadata of the game
             client (DockerClient): The docker client to use
         """
-        return Game(
-            metadata=meta,
-            container=Container.start(meta.container_name, client),
+        container = await asyncio.get_event_loop().run_in_executor(
+            None, Container.start, meta.container_name, client
         )
+        return Game(metadata=meta, container=container)
 
-    def restart(self) -> None:
+    async def restart(self) -> None:
         """Restart the game."""
         self.switching_over_allowed = False
-        self.container.restart()
+        await asyncio.get_event_loop().run_in_executor(None, self.container.restart)
         self.switching_over_allowed = True
 
-    def stop(self) -> None:
+    async def stop(self) -> None:
         """Stop the game."""
-        self.container.try_kill()
+        await asyncio.get_event_loop().run_in_executor(None, self.container.try_kill)
 
     @property
     def running(self) -> bool:

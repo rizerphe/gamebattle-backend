@@ -1,12 +1,9 @@
 """A session manager."""
 from __future__ import annotations
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from threading import RLock
 from typing import TYPE_CHECKING
 import uuid
-
-import websockets
 
 from gamebattle_backend.game import Game
 
@@ -123,7 +120,9 @@ class Manager:
             self.sessions[id_] = session
             return id_, session
 
-    def stop_session(self, session_id: uuid.UUID, owner: str | None = None) -> None:
+    async def stop_session(
+        self, session_id: uuid.UUID, owner: str | None = None
+    ) -> None:
         """Stop a session.
 
         Args:
@@ -137,5 +136,5 @@ class Manager:
             session = self.sessions[session_id]
             if owner is not None and session.owner != owner:
                 raise KeyError
-            session.stop()
+            await session.stop()
             del self.sessions[session_id]

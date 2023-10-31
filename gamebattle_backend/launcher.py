@@ -167,7 +167,7 @@ class Launcher:
         Returns:
             Game: The started game
         """
-        return Game.start(meta, self.client)
+        return await Game.start(meta, self.client)
 
     def filename_component_valid(self, component: str, strict: bool = False) -> bool:
         """Check if a file name component is valid.

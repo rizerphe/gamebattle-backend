@@ -93,6 +93,7 @@ class Container:
         if self.attached is not None:
             self.attached.close()
         self.kill()
+        self.container.wait()  # Just in case
         if self.attached is not None:
             self.attached = AttachedInstance(
                 self.container,
