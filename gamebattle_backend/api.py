@@ -782,10 +782,6 @@ class GamebattleApi:
         self,
     ) -> list[Rating]:
         """Get the leaderboard."""
-        if not self.enable_competition:
-            raise fastapi.HTTPException(
-                status_code=400, detail="Competition is not enabled."
-            )
         top_games: list[Rating] = []
         async for game in self.rating_system.top(self.launcher):
             top_games.append(game)
