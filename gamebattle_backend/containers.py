@@ -67,8 +67,8 @@ class Container:
         container = client.containers.create(
             game,
             detach=True,
-            cpu_period=50000,
-            cpu_quota=int(50000 * resource_limits.cpu_fraction),
+            cpu_period=100000,
+            cpu_quota=int(100000 * resource_limits.cpu_fraction),
             mem_limit=f"{resource_limits.memory_mb}m",
             init=True,
             mounts=[
