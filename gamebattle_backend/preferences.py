@@ -193,6 +193,9 @@ class EloRatingSystem:
     async def score(self, game: str) -> float:
         return self.ratings.get(game, self.initial)
 
+    async def score_if_exists(self, game: str) -> float:
+        return self.ratings.get(game)
+
     async def launch(
         self, launcher: Launcher, capacity: int, owner: str
     ) -> list[GameMeta]:

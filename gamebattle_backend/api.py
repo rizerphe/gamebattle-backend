@@ -51,7 +51,7 @@ class Stats:
 
     permitted: bool
     started: bool
-    elo: float
+    elo: float | None
     max_elo: float
     place: int | None
     places: int | None
@@ -572,7 +572,7 @@ class GamebattleApi:
             )
         game_owner = self.launcher[game_id].email
         top = await self.leaderboard()
-        score = await self.rating_system.score(game_id)
+        score = await self.rating_system.score_if_exists(game_id)
         reports = await self.rating_system.fetch_reports(game_id)
         return Stats(
             permitted=True,
@@ -582,7 +582,9 @@ class GamebattleApi:
             place=next(
                 (i + 1 for i, rating in enumerate(top) if score >= rating.score),
                 None,
-            ),
+            )
+            if score
+            else len(top),
             places=len(top) or 1,
             accumulation=await self.preference_store.accumulation_of_preferences_by(
                 game_owner
@@ -596,15 +598,32 @@ class GamebattleApi:
         owner: str = fastapi.Depends(firebase_email),
     ) -> list[tuple[GameMeta, Stats]]:
         if owner not in self.admin_emails:
-            raise fastapi.HTTPException(
-                status_code=400, detail="Cannot specify game ID."
-            )
+            raise fastapi.HTTPException(status_code=400, detail="Cannot get all stats.")
         return sorted(
             [
                 (game_meta, await self.admin_stats(game_meta.id, owner))
                 for game_meta in self.launcher.games
             ],
             key=lambda x: x[0].author,
+        )
+
+    async def admin_allstats_csv(
+        self,
+        owner: str = fastapi.Depends(firebase_email),
+    ):
+        if owner not in self.admin_emails:
+            raise fastapi.HTTPException(status_code=400, detail="Cannot get all stats.")
+        return fastapi.Response(
+            content="\n".join(
+                [
+                    "Author name,Author email,Game name,Elo,Place,Comparisons made,Reports"
+                ]
+                + [
+                    f"{game_meta.author},{game_meta.email},{game_meta.name},{stats.elo},{stats.place},{stats.accumulation},{stats.reports}"
+                    for game_meta, stats in await self.admin_allstats(owner)
+                ]
+            ),
+            media_type="text/csv",
         )
 
     async def set_preference(
@@ -819,6 +838,7 @@ class GamebattleApi:
         api.get("/stats")(self.stats)
         api.get("/stats/{game_id}")(self.admin_stats)
         api.get("/allstats")(self.admin_allstats)
+        api.get("/allstats/csv")(self.admin_allstats_csv)
         return api
 
     async def setup(self):
