@@ -1,6 +1,8 @@
 """The API server for the application."""
 import asyncio
+import csv
 from dataclasses import dataclass
+from io import StringIO
 import os
 from typing import Coroutine, Literal
 import uuid
@@ -58,6 +60,7 @@ class Stats:
     accumulation: float
     required_accumulation: float
     reports: int
+    times_played: int
 
 
 def firebase_email(
@@ -542,7 +545,9 @@ class GamebattleApi:
             owner: The user ID of the session owner.
         """
         top = await self.leaderboard()
-        score = await self.rating_system.score(GameMeta.id_for(owner))
+        score, n_played = await self.rating_system.score_and_played(
+            GameMeta.id_for(owner)
+        )
         reports = await self.rating_system.fetch_reports(GameMeta.id_for(owner))
         return Stats(
             permitted=True,
@@ -559,6 +564,7 @@ class GamebattleApi:
             ),
             required_accumulation=5,
             reports=len(reports),
+            times_played=n_played,
         )
 
     async def admin_stats(
@@ -572,7 +578,7 @@ class GamebattleApi:
             )
         game_owner = self.launcher[game_id].email
         top = await self.leaderboard()
-        score = await self.rating_system.score_if_exists(game_id)
+        score, n_played = await self.rating_system.score_and_played_if_exists(game_id)
         reports = await self.rating_system.fetch_reports(game_id)
         return Stats(
             permitted=True,
@@ -591,6 +597,7 @@ class GamebattleApi:
             ),
             required_accumulation=5,
             reports=len(reports),
+            times_played=n_played,
         )
 
     async def admin_allstats(
@@ -613,16 +620,34 @@ class GamebattleApi:
     ):
         if owner not in self.admin_emails:
             raise fastapi.HTTPException(status_code=400, detail="Cannot get all stats.")
+        fieldnames = [
+            "Author name",
+            "Author email",
+            "Game name",
+            "Elo",
+            "Place",
+            "Times game was played",
+            "Comparisons made",
+            "Reports",
+        ]
+        output = StringIO()
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+        for game_meta, stats in await self.admin_allstats(owner):
+            writer.writerow(
+                {
+                    "Author name": game_meta.author,
+                    "Author email": game_meta.email,
+                    "Game name": game_meta.name,
+                    "Elo": stats.elo,
+                    "Place": stats.place,
+                    "Times game was played": stats.times_played,
+                    "Comparisons made": stats.accumulation,
+                    "Reports": stats.reports,
+                }
+            )
         return fastapi.Response(
-            content="\n".join(
-                [
-                    "Author name,Author email,Game name,Elo,Place,Comparisons made,Reports"
-                ]
-                + [
-                    f"{game_meta.author},{game_meta.email},{game_meta.name},{stats.elo},{stats.place},{stats.accumulation},{stats.reports}"
-                    for game_meta, stats in await self.admin_allstats(owner)
-                ]
-            ),
+            content=output.getvalue(),
             media_type="text/csv",
         )
 
