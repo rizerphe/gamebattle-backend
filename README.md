@@ -54,9 +54,7 @@ Set up the following environment variables:
 
      redis:
        image: redis
-       command: redis-server --requirepass ${REDIS_PASSWORD}
-       environment:
-         - REDIS_PASSWORD=your_redis_password
+       command: redis-server --requirepass your_redis_password
        networks:
          - gamebattle-network
 
