@@ -48,6 +48,7 @@ Set up the following environment variables:
          - /path/to/your/credentials.json:/app/credentials.json
          - /path/to/your/games:/app/gamebattle
          - /var/run/docker.sock:/var/run/docker.sock
+         - /tmp:/tmp
        networks:
          - gamebattle-network
 
@@ -71,6 +72,12 @@ Set up the following environment variables:
    - /var/run/docker.sock:/var/run/docker.sock
    ```
    This allows the container to communicate with the Docker daemon on the host machine.
+
+   Additionally, we've mounted the /tmp directory:
+   ```
+   - /tmp:/tmp
+   ```
+   This is necessary because the application uses named pipes for inter-process communication, which are created in the /tmp directory. Mounting this directory ensures that these pipes are accessible both inside the container and on the host machine, allowing for proper communication between processes.
 
 2. Run the Docker Compose setup:
    ```
