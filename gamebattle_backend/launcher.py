@@ -148,7 +148,7 @@ class Launcher:
             "w",
             encoding="utf-8",
         ) as file:
-            file.write("""FROM python:3.11-alpine\n""")
+            file.write("""FROM python:3.12-alpine\n""")
             file.write("""WORKDIR /usr/src/app\n""")
             file.write("""COPY . .\n""")
             file.write("""ENV PYTHONUNBUFFERED=1\n""")
