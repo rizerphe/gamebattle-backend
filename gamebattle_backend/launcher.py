@@ -1,14 +1,17 @@
 """A manager for game containers."""
+
 from __future__ import annotations
-from dataclasses import asdict
+
 import glob
 import os
 import random
 import string
+from dataclasses import asdict
 from typing import TYPE_CHECKING
 
 import docker
 import yaml
+from groq import AsyncGroq, RateLimitError
 
 from .common import GameMeta
 from .game import Game
@@ -305,6 +308,85 @@ class Launcher:
         if len(found) == 0:
             return None
         return found[0]
+
+    async def get_game_summary(self, owner: str) -> str:
+        """Get an one-line AI-generated summary of a game.
+
+        Args:
+            owner (str): The owner of the game
+        """
+        # Get the entrypoint file
+        files = self.get_game_files(owner)
+        metadata = self.get_game_metadata(owner)
+        if metadata is None:
+            return "Get started by creating a game"
+        if metadata.file not in files:
+            return "Time to specify the entrypoint file!"
+        file_content = files.get(metadata.file, b"").decode("utf-8", errors="ignore")
+
+        prompt = (
+            "Here's the prototype code for what's eventually supposed "
+            f"to become a console game:\n```python\n{file_content}\n```"
+        )
+        messages = [
+            {
+                "role": "user",
+                "content": "Here's the prototype code for what's eventually supposed "
+                'to become a console game:\n```python\nprint("Hello, world!")\n```',
+            },
+            {
+                "role": "user",
+                "content": "Write a single mildly (not obviously) cat-themed "
+                "short sentence that's "
+                "either:"
+                "\n- a lighthearted joke on a not-yet-done part of the game"
+                "\n- a quick suggestion on what to do next"
+                "\n- a witty description of the game.\n"
+                "Respond with just the sentence, nothing else.",
+            },
+            {
+                "role": "assistant",
+                "content": "The game will eventually be designed to be amasing, as soon as you stops being a sleepy cat!",
+            },
+            {
+                "role": "user",
+                "content": prompt,
+            },
+            {
+                "role": "user",
+                "content": "Write a single mildly (not obviously) cat-themed "
+                "short sentence that's "
+                "either:"
+                "\n- a lighthearted joke on a not-yet-done part of the game"
+                "\n- a quick suggestion on what to do next"
+                "\n- a witty description of the game.\n"
+                "Respond with just the sentence, nothing else.",
+            },
+        ]
+
+        client = AsyncGroq()
+        try:
+            completion = await client.chat.completions.create(
+                model="llama-3.2-90b-text-preview",
+                messages=messages,
+                temperature=1,
+                max_tokens=1024,
+                top_p=1,
+                stream=False,
+                stop=None,
+            )
+        except RateLimitError:
+            completion = await client.chat.completions.create(
+                model="llama-3.2-11b-text-preview",
+                messages=messages,
+                temperature=1,
+                max_tokens=1024,
+                top_p=1,
+                stream=False,
+                stop=None,
+            )
+
+        return completion.choices[0].message.content
 
     def save_metadata(self, metadata: GameMeta) -> None:
         """Save the metadata of a game.

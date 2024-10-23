@@ -1,18 +1,19 @@
 """The API server for the application."""
+
 import asyncio
 import csv
+import os
+import uuid
 from dataclasses import dataclass
 from io import StringIO
-import os
 from typing import Coroutine, Literal
-import uuid
 
 import fastapi
+import httpx
+import redis.asyncio as redis
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from firebase_admin import json
-import httpx
-import redis.asyncio as redis
 
 from gamebattle_backend.preference_store_redis import RedisPreferenceStore
 from gamebattle_backend.preferences import (
@@ -651,6 +652,17 @@ class GamebattleApi:
             media_type="text/csv",
         )
 
+    async def get_game_summary(
+        self,
+        owner: str = fastapi.Depends(firebase_email),
+    ) -> str:
+        """Get a one-line AI-generated summary of the game.
+
+        Args:
+            owner: The user ID of the session owner.
+        """
+        return await self.launcher.get_game_summary(owner)
+
     async def set_preference(
         self,
         session_id: uuid.UUID,
@@ -864,6 +876,7 @@ class GamebattleApi:
         api.get("/stats/{game_id}")(self.admin_stats)
         api.get("/allstats")(self.admin_allstats)
         api.get("/allstats/csv")(self.admin_allstats_csv)
+        api.get("/summary")(self.get_game_summary)
         return api
 
     async def setup(self):
