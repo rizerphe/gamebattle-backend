@@ -20,6 +20,9 @@ class Summarizer:
                 # Immediately invalidate the cache to refresh the summary for the next time
                 del self.summaries[file_content]
 
+                # Start generating a new one:
+                task = asyncio.create_task(self.summarize(file_content, strong=False))
+
             return summary
 
         if file_content in self.in_progress:
