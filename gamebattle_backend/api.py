@@ -308,6 +308,9 @@ class GamebattleApi:
         try:
             game = self.manager.get_game(owner, session_id, game_id)
             if not game.running:
+                await websocket.send_json(
+                    {"type": "stdout", "data": game.accumulated_stdout}
+                )
                 await websocket.send_json({"type": "bye"})
                 await websocket.close()
                 return

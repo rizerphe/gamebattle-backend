@@ -1,9 +1,11 @@
 """Manage game docker containers."""
+
 from __future__ import annotations
+
 import contextlib
-from dataclasses import dataclass, field
 import os
 import time
+from dataclasses import dataclass, field
 from typing import AsyncIterator
 
 import docker
@@ -88,20 +90,6 @@ class Container:
         )
         return cls(container, stdin_path, stdout_path)
 
-    def restart(self) -> None:
-        """Restart the container."""
-        if self.attached is not None:
-            self.attached.close()
-        self.kill()
-        self.container.wait()  # Just in case
-        if self.attached is not None:
-            self.attached = AttachedInstance(
-                self.container,
-                os.open(self.stdin_path, os.O_RDWR),
-                os.open(self.stdout_path, os.O_RDWR),
-            )
-            self.attached.start()
-
     async def send(self, message: str) -> None:
         """Send a message to the game.
 
@@ -127,6 +115,15 @@ class Container:
             self.attached.start()
         async for data in self.attached:
             yield data
+
+    @property
+    def accumulated_stdout(self) -> str | None:
+        """Return all the accumulated stdout."""
+        return (
+            None
+            if self.attached is None
+            else self.attached.data.decode("utf-8", errors="ignore")
+        )
 
     @property
     def running(self) -> bool:

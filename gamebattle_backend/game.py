@@ -1,9 +1,11 @@
 """This module contains the game class,
 responsible for managing a game's metadata."""
+
 from __future__ import annotations
+
 import asyncio
 from dataclasses import dataclass
-from typing import AsyncIterator, TYPE_CHECKING
+from typing import TYPE_CHECKING, AsyncIterator
 
 from .common import GameMeta
 from .containers import Container
@@ -26,6 +28,8 @@ class Game:
 
     metadata: GameMeta
     container: Container
+    client: DockerClient
+
     over: bool = False  # TODO: make this more robust to game restarts
     switching_over_allowed: bool = True
 
@@ -40,12 +44,15 @@ class Game:
         container = await asyncio.get_event_loop().run_in_executor(
             None, Container.start, meta.container_name, client
         )
-        return Game(metadata=meta, container=container)
+        return Game(metadata=meta, container=container, client=client)
 
     async def restart(self) -> None:
         """Restart the game."""
         self.switching_over_allowed = False
-        await asyncio.get_event_loop().run_in_executor(None, self.container.restart)
+        await asyncio.get_event_loop().run_in_executor(None, self.container.kill)
+        self.container = await asyncio.get_event_loop().run_in_executor(
+            None, Container.start, self.metadata.container_name, self.client
+        )
         self.switching_over_allowed = True
 
     async def stop(self) -> None:
@@ -74,3 +81,8 @@ class Game:
     def public(self) -> GamePublic:
         """Return the public interface of the game."""
         return GamePublic(name=self.metadata.name, over=self.over)
+
+    @property
+    def accumulated_stdout(self) -> str | None:
+        """Return all the accumulated stdout."""
+        return self.container.accumulated_stdout
