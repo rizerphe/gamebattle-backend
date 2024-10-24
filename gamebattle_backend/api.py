@@ -882,6 +882,7 @@ class GamebattleApi:
     async def setup(self):
         """Setup the API server."""
         await self.launcher.prelaunch_games()
+        await self.launcher.start_generating_summaries()
         await self.preference_store.bind(self.rating_system)
 
     async def shutdown(self):

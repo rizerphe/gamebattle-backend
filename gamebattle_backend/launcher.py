@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import glob
 import os
 import random
@@ -11,10 +13,10 @@ from typing import TYPE_CHECKING
 
 import docker
 import yaml
-from groq import AsyncGroq, RateLimitError
 
 from .common import GameMeta
 from .game import Game
+from .summarize import Summarizer
 
 if TYPE_CHECKING:
     from .session import LaunchStrategy
@@ -100,6 +102,7 @@ class Launcher:
         self.games_path = games_path
 
         self.games = self.scan_games()
+        self.summarizer = Summarizer()
 
     def __getitem__(self, game_id: str, /) -> GameMeta:
         """Get a game by id.
@@ -324,69 +327,7 @@ class Launcher:
             return "Time to specify the entrypoint file!"
         file_content = files.get(metadata.file, b"").decode("utf-8", errors="ignore")
 
-        prompt = (
-            "Here's the prototype code for what's eventually supposed "
-            f"to become a console game:\n```python\n{file_content}\n```"
-        )
-        messages = [
-            {
-                "role": "user",
-                "content": "Here's the prototype code for what's eventually supposed "
-                'to become a console game:\n```python\nprint("Hello, world!")\n```',
-            },
-            {
-                "role": "user",
-                "content": "Write a single mildly (not obviously) cat-themed "
-                "short sentence that's "
-                "either:"
-                "\n- a lighthearted joke on a not-yet-done part of the game"
-                "\n- a quick suggestion on what to do next"
-                "\n- a witty description of the game.\n"
-                "Respond with just the sentence, nothing else.",
-            },
-            {
-                "role": "assistant",
-                "content": "The game will eventually be designed to be amasing, as soon as you stops being a sleepy cat!",
-            },
-            {
-                "role": "user",
-                "content": prompt,
-            },
-            {
-                "role": "user",
-                "content": "Write a single mildly (not obviously) cat-themed "
-                "short sentence that's "
-                "either:"
-                "\n- a lighthearted joke on a not-yet-done part of the game"
-                "\n- a quick suggestion on what to do next"
-                "\n- a witty description of the game.\n"
-                "Respond with just the sentence, nothing else.",
-            },
-        ]
-
-        client = AsyncGroq()
-        try:
-            completion = await client.chat.completions.create(
-                model="llama-3.2-90b-text-preview",
-                messages=messages,
-                temperature=1,
-                max_tokens=1024,
-                top_p=1,
-                stream=False,
-                stop=None,
-            )
-        except RateLimitError:
-            completion = await client.chat.completions.create(
-                model="llama-3.2-11b-text-preview",
-                messages=messages,
-                temperature=1,
-                max_tokens=1024,
-                top_p=1,
-                stream=False,
-                stop=None,
-            )
-
-        return completion.choices[0].message.content
+        return await self.summarizer.summarize(file_content)
 
     def save_metadata(self, metadata: GameMeta) -> None:
         """Save the metadata of a game.
@@ -481,3 +422,41 @@ class Prelauncher(Launcher):
         if metadata in self.prelaunched:
             del self.prelaunched[metadata]
         return super().build_game(metadata)
+
+    async def _generate_summaries(self):
+        """Generate summaries for all games continuously,
+        one game per minute, as they are updated.
+        """
+        print("Starting to generate summaries", flush=True)
+        while True:
+            owners = [game.email for game in self.games]
+            random.shuffle(owners)
+
+            # Find first game that needs a summary
+            for owner in owners:
+                files = self.get_game_files(owner)
+                metadata = self.get_game_metadata(owner)
+                if metadata is None:
+                    continue
+                if metadata.file not in files:
+                    continue
+                file_content = files.get(metadata.file, b"").decode(
+                    "utf-8", errors="ignore"
+                )
+
+                if self.summarizer.will_summary_exist(file_content):
+                    continue
+
+                with contextlib.suppress(Exception):
+                    print(
+                        f"Generating summary for {metadata.email}'s game {metadata.name}",
+                        flush=True,
+                    )
+                    await self.summarizer.summarize(file_content, strong=False)
+                    break
+
+            await asyncio.sleep(60)
+
+    async def start_generating_summaries(self):
+        """Start generating summaries."""
+        asyncio.create_task(self._generate_summaries())
