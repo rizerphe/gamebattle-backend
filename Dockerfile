@@ -2,6 +2,10 @@ FROM python:3.12-slim AS build-image
 WORKDIR /app
 
 RUN pip install --user uvicorn
+
+COPY requirements.txt /app
+RUN pip install --user -r requirements.txt
+
 COPY . /app
 RUN pip install --user .
 

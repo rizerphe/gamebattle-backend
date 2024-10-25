@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import os
 import time
 from dataclasses import dataclass, field
 from typing import AsyncIterator
@@ -32,14 +31,12 @@ class Container:
     """A class containing all the info about a container"""
 
     container: docker.models.containers.Container
-    stdin_path: str
-    stdout_path: str
     attached: AttachedInstance | None = None
     start_time: float = field(default_factory=time.time)
 
     def __del__(self) -> None:
         """Kill the container when the object is deleted."""
-        self.try_kill()
+        self.container.kill("SIGKILL")
 
     @classmethod
     def start(
@@ -61,10 +58,6 @@ class Container:
         resource_limits = resource_limits or Limits.default()
         # Create FIFO pair for stdio
         tmpdir = tempfile.mkdtemp()
-        stdin_path = f"{tmpdir}/stdin"
-        stdout_path = f"{tmpdir}/stdout"
-        os.mkfifo(stdin_path)
-        os.mkfifo(stdout_path)
         # Create container
         container = client.containers.create(
             game,
@@ -73,22 +66,10 @@ class Container:
             cpu_quota=int(100000 * resource_limits.cpu_fraction),
             mem_limit=f"{resource_limits.memory_mb}m",
             init=True,
-            mounts=[
-                docker.types.Mount(
-                    type="bind",
-                    source=stdin_path,
-                    target="/dev/game_stdin",
-                    read_only=False,
-                ),
-                docker.types.Mount(
-                    type="bind",
-                    source=stdout_path,
-                    target="/dev/game_stdout",
-                    read_only=False,
-                ),
-            ],
+            stdin_open=True,
+            tty=True,
         )
-        return cls(container, stdin_path, stdout_path)
+        return cls(container)
 
     async def send(self, message: str) -> None:
         """Send a message to the game.
@@ -98,7 +79,18 @@ class Container:
         """
         if self.attached is None:
             return
-        self.attached.send(message)
+        await self.attached.send(message)
+
+    async def resize(self, width: int, height: int) -> None:
+        """Resize the container.
+
+        Args:
+            width (int): The new width
+            height (int): The new height
+        """
+        if self.attached is None:
+            return
+        await self.attached.resize(width, height)
 
     async def receive(self) -> AsyncIterator[str]:
         """Receive stdout from the game.
@@ -109,10 +101,8 @@ class Container:
         if self.attached is None:
             self.attached = AttachedInstance(
                 self.container,
-                os.open(self.stdin_path, os.O_RDWR),
-                os.open(self.stdout_path, os.O_RDWR),
             )
-            self.attached.start()
+            await self.attached.start()
         async for data in self.attached:
             yield data
 
@@ -130,14 +120,14 @@ class Container:
         self.container.reload()
         return self.container.status in ["created", "running"]
 
-    def kill(self) -> None:
+    async def kill(self) -> None:
         """Kill the container."""
         if self.running:
             self.container.kill("SIGKILL")
             if self.attached is not None:
-                self.attached.close()
+                await self.attached.close()
 
-    def try_kill(self) -> None:
+    async def try_kill(self) -> None:
         """Try to kill the container, but don't raise any errors."""
         with contextlib.suppress(Exception):
-            self.kill()
+            await self.kill()

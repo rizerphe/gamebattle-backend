@@ -1,6 +1,7 @@
 """The API server for the application."""
 
 import asyncio
+import contextlib
 import csv
 import os
 import uuid
@@ -336,7 +337,21 @@ class GamebattleApi:
             game_socket: The game's websocket.
         """
         async for message in websocket.iter_text():
-            await game.send(message)
+            with contextlib.suppress(json.JSONDecodeError):
+                message = json.loads(message)
+                if not isinstance(message, dict):
+                    continue
+                if message.get("type") == "stdin":
+                    data = message.get("data")
+                    if not isinstance(data, str):
+                        continue
+                    await game.send(message.get("data", ""))
+                elif message.get("type") == "resize":
+                    rows = message.get("rows")
+                    cols = message.get("cols")
+                    if not isinstance(rows, int) or not isinstance(cols, int):
+                        continue
+                    await game.resize(cols, rows)
 
     async def _ws_receive(
         self,

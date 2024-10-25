@@ -1,40 +1,12 @@
 """A class representing a single object attached to a container's output."""
+
 from __future__ import annotations
+
 import asyncio
-import contextlib
-import os
-import select
-import threading
-import time
-from typing import Generic, Iterable, Iterator, TypeVar
+import socket
+from typing import AsyncIterator
 
 import docker
-
-T = TypeVar("T")
-
-
-class AsyncIteratorWrapper(Generic[T]):
-    def __init__(self, iterator: Iterable[T]) -> None:
-        self.iterator = iterator
-        self.queue: asyncio.Queue[tuple[T] | None] = asyncio.Queue()
-        self.start_thread()
-
-    async def __aiter__(self) -> AsyncIteratorWrapper[T]:
-        return self
-
-    async def __anext__(self) -> T:
-        data = await self.queue.get()
-        if data is None:
-            raise StopAsyncIteration
-        return data[0]
-
-    def start_thread(self):
-        threading.Thread(target=self.read_loop).start()
-
-    def read_loop(self):
-        for data in self.iterator:
-            asyncio.run(self.queue.put((data,)))
-        asyncio.run(self.queue.put(None))
 
 
 class AttachedInstance:
@@ -43,94 +15,73 @@ class AttachedInstance:
     def __init__(
         self,
         container: docker.models.containers.Container,
-        stdin_fd: int,
-        stdout_fd: int,
     ) -> None:
         self.container = container
-        self.closed = False
-        self.stdin: int = stdin_fd
-        self.stdout: int = stdout_fd
-        self.wait_for_exit_thread: threading.Thread | None = None
-        self.stdin_thread: threading.Thread | None = None
+        self.wait_for_exit_task: asyncio.Task | None = None
+        self.stdin_task: asyncio.Task | None = None
         self.data = b""
-        self.new_data = threading.Condition()
+        self.new_data = asyncio.Condition()
 
-    def create_stdin(self) -> None:
-        # self.stdin = self.container.attach_socket(
-        #    params={
-        #        "stdin": 1,
-        #        "stdout": 1,
-        #        "stderr": 1,
-        #        "stream": 1,
-        #    },
-        # )
-        # self.stdin._sock.setblocking(False)
-        self.container.start()
-        while not self.container.status == "running":
-            time.sleep(0.1)
-            self.container.reload()
+        self.closed = False
 
-    def read_stdin_loop(self) -> None:
+        self.container_socket = container.attach_socket(
+            params={"stdin": 1, "stdout": 1, "stderr": 1, "stream": 1, "logs": 1}
+        )
+        self.container_socket._sock.setblocking(False)  # Non-blocking socket
+
+    async def read_stdin_loop(self) -> None:
         while not self.closed:
             try:
-                ready, _, _ = select.select([self.stdout], [], [], 5)
-                if not ready:
+                output = self.container_socket._sock.recv(1024)
+
+                if not output:
+                    await asyncio.sleep(0.01)
                     continue
-                with self.new_data:
-                    self.data += os.read(self.stdout, 1024)
+                async with self.new_data:
+                    self.data += output
                     self.new_data.notify_all()
-            except OSError:
-                with self.new_data:
+            except socket.error as e:
+                if e.errno == 11:  # Ignore Resource temporarily unavailable
+                    await asyncio.sleep(0.1)
+                    continue
+                async with self.new_data:
                     self.closed = True
                     self.new_data.notify_all()
 
-    def wait_for_exit(self) -> None:
-        self.container.wait()
+    async def wait_for_exit(self) -> None:
+        await asyncio.get_event_loop().run_in_executor(None, self.container.wait)
         self.closed = True
-        with contextlib.suppress(OSError):
-            os.close(self.stdout)
-            os.close(self.stdin)
-        with self.new_data:
+        async with self.new_data:
             self.new_data.notify_all()
 
-    def close(self) -> None:
-        with self.new_data:
+    async def close(self) -> None:
+        async with self.new_data:
             self.closed = True
-            with contextlib.suppress(OSError):
-                os.close(self.stdout)
-                os.close(self.stdin)
             self.new_data.notify_all()
-        self.container.wait()
+        await asyncio.get_event_loop().run_in_executor(None, self.container.wait)
 
-    def start_stdin_thread(self) -> None:
-        with self.new_data:
-            if self.stdin_thread is not None:
+    async def start_stdin_task(self) -> None:
+        async with self.new_data:
+            if self.stdin_task is not None:
                 return
-            self.create_stdin()
-            self.stdin_thread = threading.Thread(target=self.read_stdin_loop)
-            self.stdin_thread.start()
+            self.stdin_task = asyncio.create_task(self.read_stdin_loop())
 
-    def start_wait_for_exit_thread(self) -> None:
-        with self.new_data:
-            if self.wait_for_exit_thread is not None:
+    async def start_wait_for_exit_task(self) -> None:
+        async with self.new_data:
+            if self.wait_for_exit_task is not None:
                 return
-            self.wait_for_exit_thread = threading.Thread(target=self.wait_for_exit)
-            self.wait_for_exit_thread.start()
+            self.wait_for_exit_task = asyncio.create_task(self.wait_for_exit())
 
-    def start(self) -> None:
-        self.start_stdin_thread()
-        self.start_wait_for_exit_thread()
+    async def start(self) -> None:
+        await self.start_stdin_task()
+        await self.start_wait_for_exit_task()
         self.container.start()
 
-    def send(self, data: str) -> None:
-        if self.stdin is None:
-            return
-        with self.new_data:
-            os.write(self.stdin, data.encode("utf-8"))
-            if self.stdin != self.stdout:
-                # We assume properly set up pipes
-                self.data += data.encode("utf-8")
-            self.new_data.notify_all()
+    async def send(self, data: str) -> None:
+        self.container_socket._sock.send(data.encode("utf-8"))
+
+    async def resize(self, width: int, height: int) -> None:
+        self.container.resize(width=width, height=height)
 
     def decode_data(self, data: bytes, start_pointer: int) -> tuple[str, int]:
         """Decode the data from the start pointer."""
@@ -143,15 +94,12 @@ class AttachedInstance:
                 continue
         return "", new_pointer
 
-    def __iter__(self) -> Iterator[str]:
+    async def __aiter__(self) -> AsyncIterator[str]:
         pointer = 0
         while not self.closed:
-            with self.new_data:
+            async with self.new_data:
                 decoded_data, pointer = self.decode_data(self.data, pointer)
                 if not decoded_data:
-                    self.new_data.wait()
+                    await self.new_data.wait()
             if decoded_data:
                 yield decoded_data
-
-    def __aiter__(self) -> AsyncIteratorWrapper[str]:
-        return AsyncIteratorWrapper(self)

@@ -49,7 +49,7 @@ class Game:
     async def restart(self) -> None:
         """Restart the game."""
         self.switching_over_allowed = False
-        await asyncio.get_event_loop().run_in_executor(None, self.container.kill)
+        await self.container.kill()
         self.container = await asyncio.get_event_loop().run_in_executor(
             None, Container.start, self.metadata.container_name, self.client
         )
@@ -57,7 +57,7 @@ class Game:
 
     async def stop(self) -> None:
         """Stop the game."""
-        await asyncio.get_event_loop().run_in_executor(None, self.container.try_kill)
+        await self.container.try_kill()
 
     @property
     def running(self) -> bool:
@@ -71,6 +71,10 @@ class Game:
     async def send(self, messsage: str) -> None:
         """Send a message to the game."""
         await self.container.send(messsage)
+
+    async def resize(self, width: int, height: int) -> None:
+        """Resize the game."""
+        await self.container.resize(width, height)
 
     async def receive(self) -> AsyncIterator[str]:
         """Receive a message from the game."""
