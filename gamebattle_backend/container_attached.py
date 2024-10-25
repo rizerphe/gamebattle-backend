@@ -29,30 +29,25 @@ class AttachedInstance:
         )
         self.container_socket._sock.setblocking(False)  # Non-blocking socket
 
-    async def read_stdin_loop(self) -> None:
-        while not self.closed:
-            try:
-                output = self.container_socket._sock.recv(1024)
+    async def register_data(self, data: bytes):
+        async with self.new_data:
+            self.data += data
+            self.new_data.notify_all()
 
-                if not output:
-                    await asyncio.sleep(0.01)
-                    continue
-                async with self.new_data:
-                    self.data += output
-                    self.new_data.notify_all()
-            except socket.error as e:
-                if e.errno == 11:  # Ignore Resource temporarily unavailable
-                    await asyncio.sleep(0.1)
-                    continue
-                async with self.new_data:
-                    self.closed = True
-                    self.new_data.notify_all()
+    def on_container_output(self):
+        try:
+            output = self.container_socket._sock.recv(1024)
+            if output:
+                asyncio.create_task(self.register_data(output))
+        except socket.error as e:
+            print(f"Socket error: {e}", flush=True)
 
     async def wait_for_exit(self) -> None:
         await asyncio.get_event_loop().run_in_executor(None, self.container.wait)
         self.closed = True
         async with self.new_data:
             self.new_data.notify_all()
+        asyncio.get_event_loop().remove_reader(self.container_socket._sock)
 
     async def close(self) -> None:
         async with self.new_data:
@@ -64,7 +59,9 @@ class AttachedInstance:
         async with self.new_data:
             if self.stdin_task is not None:
                 return
-            self.stdin_task = asyncio.create_task(self.read_stdin_loop())
+            asyncio.get_event_loop().add_reader(
+                self.container_socket._sock, self.on_container_output
+            )
 
     async def start_wait_for_exit_task(self) -> None:
         async with self.new_data:

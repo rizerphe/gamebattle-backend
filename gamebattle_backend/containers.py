@@ -78,7 +78,10 @@ class Container:
             message (str): The message to send
         """
         if self.attached is None:
-            return
+            self.attached = AttachedInstance(
+                self.container,
+            )
+            await self.attached.start()
         await self.attached.send(message)
 
     async def resize(self, width: int, height: int) -> None:
@@ -89,7 +92,10 @@ class Container:
             height (int): The new height
         """
         if self.attached is None:
-            return
+            self.attached = AttachedInstance(
+                self.container,
+            )
+            await self.attached.start()
         await self.attached.resize(width, height)
 
     async def receive(self) -> AsyncIterator[str]:
