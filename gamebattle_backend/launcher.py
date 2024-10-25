@@ -22,6 +22,19 @@ if TYPE_CHECKING:
     from .session import LaunchStrategy
 
 
+class GamebattleError(Exception):
+    """Raised when a file upload fails."""
+
+    def __init__(self, message: str) -> None:
+        """Initialize the error.
+
+        Args:
+            message (str): The message of the error
+        """
+        super().__init__(message)
+        self.message = message
+
+
 async def launch_randomly(
     launcher: Launcher, capacity: int, owner: str
 ) -> list[GameMeta]:
@@ -64,7 +77,7 @@ async def launch_own(launcher: Launcher, capacity: int, owner: str) -> list[Game
     """Launch user's own games.
 
     Raises:
-        ValueError: If the user requests more than one game or if the user has no games.
+        GamebattleError: If the user requests more than one game or if the user has no games.
 
     Args:
         launcher (Launcher): The launcher to use
@@ -72,10 +85,10 @@ async def launch_own(launcher: Launcher, capacity: int, owner: str) -> list[Game
         owner (str): The owner of the session
     """
     if capacity > 1:
-        raise ValueError("Can only own one game at a time")
+        raise GamebattleError("Can only own one game at a time")
     available = [game for game in launcher.games if game.email == owner]
     if not available:
-        raise ValueError("No games available")
+        raise GamebattleError("No games available")
     return random.sample(available, capacity)
 
 
@@ -227,11 +240,11 @@ class Launcher:
             filename (str): The name of the file
         """
         if not self.check_file_name(filename):
-            raise ValueError("Invalid file name")
+            raise GamebattleError("Invalid file name")
         if len(game_file_content) > 128 * 1024:
-            raise ValueError("File too large")
+            raise GamebattleError("File too large")
         if len(self.get_game_files(owner)) > 64:
-            raise ValueError("Too many files")
+            raise GamebattleError("Too many files")
 
         # Recursively create the folder (including the sections of the file's path)
         os.makedirs(
@@ -258,7 +271,7 @@ class Launcher:
             filename (str): The name of the file
         """
         if not self.check_file_name(filename):
-            raise ValueError("Invalid file name")
+            raise GamebattleError("Invalid file name")
         try:
             os.remove(
                 os.path.join(self.games_path, GameMeta.folder_name_for(owner), filename)

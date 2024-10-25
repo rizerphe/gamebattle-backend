@@ -29,7 +29,7 @@ from gamebattle_backend.report_store_redis import RedisReportStore
 from .auth import User, verify, verify_user
 from .common import GameMeta
 from .game import Game
-from .launcher import Prelauncher, launch_own, launch_specified
+from .launcher import GamebattleError, Prelauncher, launch_own, launch_specified
 from .manager import Manager, TooManySessionsError
 from .session import SessionPublic
 
@@ -247,8 +247,8 @@ class GamebattleApi:
             raise fastapi.HTTPException(
                 status_code=400, detail="Too many sessions for user."
             )
-        except ValueError:
-            raise fastapi.HTTPException(status_code=400, detail="No games available.")
+        except GamebattleError as e:
+            raise fastapi.HTTPException(status_code=400, detail=e.message)
 
     async def stop_session(
         self,
@@ -400,10 +400,8 @@ class GamebattleApi:
                 content,
                 filename,
             )
-        except ValueError:
-            raise fastapi.HTTPException(
-                status_code=400, detail="Invalid file name or content."
-            )
+        except GamebattleError as e:
+            raise fastapi.HTTPException(status_code=400, detail=e.message)
 
     def remove_game_file(
         self,
@@ -422,10 +420,8 @@ class GamebattleApi:
             )
         try:
             self.launcher.remove_game_file(owner, filename)
-        except ValueError:
-            raise fastapi.HTTPException(
-                status_code=400, detail="Invalid file name or content."
-            )
+        except GamebattleError as e:
+            raise fastapi.HTTPException(status_code=400, detail=e.message)
 
     def admin_remove_game_file(
         self,
@@ -446,10 +442,8 @@ class GamebattleApi:
             )
         try:
             self.launcher.remove_game_file(self.launcher[game_id].email, filename)
-        except ValueError:
-            raise fastapi.HTTPException(
-                status_code=400, detail="Invalid file name or content."
-            )
+        except GamebattleError as e:
+            raise fastapi.HTTPException(status_code=400, detail=e.message)
 
     def get_game_files(
         self,
