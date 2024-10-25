@@ -32,6 +32,10 @@ class AttachedInstance:
     async def register_data(self, data: bytes):
         async with self.new_data:
             self.data += data
+            # 16 MB limit - kill if exceeded
+            if len(self.data) > 1024 * 1024 * 16:
+                self.container.kill(signal=9)
+                self.data += b"\n\nKilled due to exceeding 16 MB output limit."
             self.new_data.notify_all()
 
     def on_container_output(self):
