@@ -304,6 +304,7 @@ class GamebattleApi:
         jwt = await websocket.receive_text()
         owner = verify(jwt)
         if owner is None:
+            await websocket.send_json({"type": "bye"})
             await websocket.close()
             return
         try:
@@ -323,6 +324,7 @@ class GamebattleApi:
                 return_when=asyncio.FIRST_COMPLETED,
             )
         except KeyError:
+            await websocket.send_json({"type": "bye"})
             await websocket.close()
 
     async def _ws_send(

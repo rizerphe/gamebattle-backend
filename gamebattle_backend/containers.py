@@ -8,7 +8,6 @@ from dataclasses import dataclass, field
 from typing import AsyncIterator
 
 import docker
-from docker.utils.build import tempfile
 
 from gamebattle_backend.container_attached import AttachedInstance
 
@@ -56,8 +55,6 @@ class Container:
             Container: The container object, running the game
         """
         resource_limits = resource_limits or Limits.default()
-        # Create FIFO pair for stdio
-        tmpdir = tempfile.mkdtemp()
         # Create container
         container = client.containers.create(
             game,
