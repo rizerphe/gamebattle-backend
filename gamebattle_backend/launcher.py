@@ -128,17 +128,22 @@ class Launcher:
                 return game
         raise KeyError(game_id)
 
-    def scan_games(self) -> list[GameMeta]:
+    def scan_games(self, build_all: bool = False) -> list[GameMeta]:
         """Scan the games folder for games."""
         indexes = glob.glob(os.path.join(self.games_path, "*.yaml"))
         games: list[GameMeta] = []
-        for index in indexes:
+        for i, index in enumerate(indexes):
             with open(index, "r", encoding="utf-8") as file:
                 data = yaml.safe_load(file)
                 game = GameMeta(**data)
                 games.append(game)
 
+                print(
+                    f"[{i}/{len(indexes)}] Building {game.name} by {game.email}",
+                    flush=True,
+                )
                 self.create_docker_context_for(game)
+        print("Finished building games", flush=True)
         return games
 
     def create_docker_context_for(self, game: GameMeta) -> None:

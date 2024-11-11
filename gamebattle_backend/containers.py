@@ -36,7 +36,8 @@ class Container:
     def __del__(self) -> None:
         """Kill the container when the object is deleted."""
         if self.running:
-            self.container.kill("SIGKILL")
+            with contextlib.suppress(Exception):
+                self.container.kill("SIGKILL")
 
     @classmethod
     def start(
