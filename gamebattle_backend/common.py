@@ -1,4 +1,5 @@
 """Common types."""
+
 from enum import Enum
 
 from pydantic.dataclasses import dataclass
@@ -40,7 +41,7 @@ class GameMeta:
     @classmethod
     def folder_name_for(cls, email: str) -> str:
         """The name of the game's folder"""
-        return email.split("@")[0].split(".")[0]
+        return email.split("@")[0]
 
     @property
     def folder_name(self) -> str:
