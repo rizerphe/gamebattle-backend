@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from asyncio import Lock
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -52,9 +51,8 @@ class Manager:
         self.sessions: dict[uuid.UUID, Session] = {}
         self.launcher = launcher
         self.config = config or Config.default()
-        self.lock = Lock()
 
-    async def get_session(self, user_id: str, session_id: uuid.UUID) -> Session:
+    def get_session(self, user_id: str, session_id: uuid.UUID) -> Session:
         """Return a session.
 
         Args:
@@ -64,13 +62,12 @@ class Manager:
         Raises:
             KeyError: If the session does not exist.
         """
-        async with self.lock:
-            session = self.sessions[session_id]
-            if session.owner != user_id:
-                raise KeyError
-            return session
+        session = self.sessions[session_id]
+        if session.owner != user_id:
+            raise KeyError
+        return session
 
-    async def get_game(self, user_id: str, session_id: uuid.UUID, game_id: int) -> Game:
+    def get_game(self, user_id: str, session_id: uuid.UUID, game_id: int) -> Game:
         """Return a game.
 
         Args:
@@ -81,7 +78,7 @@ class Manager:
         Raises:
             KeyError: If the session or game does not exist.
         """
-        return (await self.get_session(user_id, session_id)).games[game_id]
+        return self.get_session(user_id, session_id).games[game_id]
 
     def user_sessions(self, user_id: str) -> dict[uuid.UUID, Session]:
         """Return a dictionary of sessions for a user.
@@ -111,15 +108,14 @@ class Manager:
         Raises:
             TooManySessionsError: If the user already has too many sessions.
         """
-        async with self.lock:
-            if len(self.user_sessions(owner)) >= self.config.max_sessions_per_user:
-                raise TooManySessionsError
-            session = await Session.launch(
-                owner, self.launcher, launch_strategy, capacity=capacity
-            )
-            id_ = uuid.uuid4()
-            self.sessions[id_] = session
-            return id_, session
+        if len(self.user_sessions(owner)) >= self.config.max_sessions_per_user:
+            raise TooManySessionsError
+        session = await Session.launch(
+            owner, self.launcher, launch_strategy, capacity=capacity
+        )
+        id_ = uuid.uuid4()
+        self.sessions[id_] = session
+        return id_, session
 
     async def stop_session(
         self, session_id: uuid.UUID, owner: str | None = None
@@ -133,9 +129,8 @@ class Manager:
         Raises:
             KeyError: If the session does not exist.
         """
-        async with self.lock:
-            session = self.sessions[session_id]
-            if owner is not None and session.owner != owner:
-                raise KeyError
-            await session.stop()
-            del self.sessions[session_id]
+        session = self.sessions[session_id]
+        if owner is not None and session.owner != owner:
+            raise KeyError
+        await session.stop()
+        del self.sessions[session_id]
