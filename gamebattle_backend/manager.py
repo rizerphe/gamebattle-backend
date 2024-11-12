@@ -1,9 +1,11 @@
 """A session manager."""
+
 from __future__ import annotations
-from dataclasses import dataclass
-from threading import RLock
-from typing import TYPE_CHECKING
+
 import uuid
+from asyncio import Lock
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from gamebattle_backend.game import Game
 
@@ -50,9 +52,9 @@ class Manager:
         self.sessions: dict[uuid.UUID, Session] = {}
         self.launcher = launcher
         self.config = config or Config.default()
-        self.lock = RLock()
+        self.lock = Lock()
 
-    def get_session(self, user_id: str, session_id: uuid.UUID) -> Session:
+    async def get_session(self, user_id: str, session_id: uuid.UUID) -> Session:
         """Return a session.
 
         Args:
@@ -62,13 +64,13 @@ class Manager:
         Raises:
             KeyError: If the session does not exist.
         """
-        with self.lock:
+        async with self.lock:
             session = self.sessions[session_id]
             if session.owner != user_id:
                 raise KeyError
             return session
 
-    def get_game(self, user_id: str, session_id: uuid.UUID, game_id: int) -> Game:
+    async def get_game(self, user_id: str, session_id: uuid.UUID, game_id: int) -> Game:
         """Return a game.
 
         Args:
@@ -79,7 +81,7 @@ class Manager:
         Raises:
             KeyError: If the session or game does not exist.
         """
-        return self.get_session(user_id, session_id).games[game_id]
+        return (await self.get_session(user_id, session_id)).games[game_id]
 
     def user_sessions(self, user_id: str) -> dict[uuid.UUID, Session]:
         """Return a dictionary of sessions for a user.
@@ -87,12 +89,11 @@ class Manager:
         Args:
             user_id: The user ID.
         """
-        with self.lock:
-            return {
-                session_id: session
-                for session_id, session in self.sessions.items()
-                if session.owner == user_id
-            }
+        return {
+            session_id: session
+            for session_id, session in self.sessions.items()
+            if session.owner == user_id
+        }
 
     async def create_session(
         self,
@@ -110,7 +111,7 @@ class Manager:
         Raises:
             TooManySessionsError: If the user already has too many sessions.
         """
-        with self.lock:
+        async with self.lock:
             if len(self.user_sessions(owner)) >= self.config.max_sessions_per_user:
                 raise TooManySessionsError
             session = await Session.launch(
@@ -132,7 +133,7 @@ class Manager:
         Raises:
             KeyError: If the session does not exist.
         """
-        with self.lock:
+        async with self.lock:
             session = self.sessions[session_id]
             if owner is not None and session.owner != owner:
                 raise KeyError

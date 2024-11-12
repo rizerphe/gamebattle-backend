@@ -235,14 +235,14 @@ class GamebattleApi:
                 if len(session.games) != 1 and owner not in self.admin_emails:
                     continue
                 await self.manager.stop_session(session_id, owner)
-            session = await self.manager.create_session(
+            session_id, session = await self.manager.create_session(
                 owner,
                 launch_strategy=launch_own
                 if game_id is None
                 else launch_specified(game_id),
                 capacity=1,
             )
-            return session[0]
+            return session_id
         except TooManySessionsError:
             raise fastapi.HTTPException(
                 status_code=400, detail="Too many sessions for user."
@@ -280,7 +280,7 @@ class GamebattleApi:
             owner: The user ID of the session owner.
         """
         try:
-            await self.manager.get_game(owner, session_id, game_id).restart()
+            await (await self.manager.get_game(owner, session_id, game_id)).restart()
         except KeyError:
             raise fastapi.HTTPException(
                 status_code=404, detail="Session or game not found."
@@ -308,7 +308,7 @@ class GamebattleApi:
             await websocket.close()
             return
         try:
-            game = self.manager.get_game(owner, session_id, game_id)
+            game = await self.manager.get_game(owner, session_id, game_id)
             if not game.running:
                 await websocket.send_json(
                     {"type": "stdout", "data": game.accumulated_stdout}
@@ -695,7 +695,7 @@ class GamebattleApi:
                 status_code=400, detail="Competition is not enabled."
             )
         try:
-            session = self.manager.get_session(player, session_id)
+            session = await self.manager.get_session(player, session_id)
         except KeyError:
             raise fastapi.HTTPException(status_code=404, detail="Session not found.")
         if not session.over:
@@ -808,7 +808,7 @@ class GamebattleApi:
                 rating = await self.preference_store.get(session_id)
                 if rating is not None:
                     return
-                session = self.manager.get_session(owner, session_id)
+                session = await self.manager.get_session(owner, session_id)
                 tasks.append(
                     session.replace_game(
                         game_id,
@@ -817,7 +817,7 @@ class GamebattleApi:
                         self.rating_system.launch_preloaded,
                     )
                 )
-            game = self.manager.get_game(owner, session_id, game_id)
+            game = await self.manager.get_game(owner, session_id, game_id)
             report = Report(session_id, short_reason, reason, output, owner)
             accumulated_reports = await self.rating_system.report(game.metadata, report)
             if accumulated_reports:
