@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import time
 from dataclasses import dataclass, field
@@ -137,4 +138,5 @@ class Container:
     async def try_kill(self) -> None:
         """Try to kill the container, but don't raise any errors."""
         with contextlib.suppress(Exception):
-            await self.kill()
+            async with asyncio.timeout(5):
+                await self.kill()
