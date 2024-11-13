@@ -280,7 +280,7 @@ class GamebattleApi:
             owner: The user ID of the session owner.
         """
         try:
-            await (await self.manager.get_game(owner, session_id, game_id)).restart()
+            await self.manager.get_game(owner, session_id, game_id).restart()
         except KeyError:
             raise fastapi.HTTPException(
                 status_code=404, detail="Session or game not found."
@@ -308,7 +308,7 @@ class GamebattleApi:
             await websocket.close()
             return
         try:
-            game = await self.manager.get_game(owner, session_id, game_id)
+            game = self.manager.get_game(owner, session_id, game_id)
             if not game.running:
                 await websocket.send_json(
                     {"type": "stdout", "data": game.accumulated_stdout}
@@ -695,7 +695,7 @@ class GamebattleApi:
                 status_code=400, detail="Competition is not enabled."
             )
         try:
-            session = await self.manager.get_session(player, session_id)
+            session = self.manager.get_session(player, session_id)
         except KeyError:
             raise fastapi.HTTPException(status_code=404, detail="Session not found.")
         if not session.over:
@@ -808,7 +808,7 @@ class GamebattleApi:
                 rating = await self.preference_store.get(session_id)
                 if rating is not None:
                     return
-                session = await self.manager.get_session(owner, session_id)
+                session = self.manager.get_session(owner, session_id)
                 tasks.append(
                     session.replace_game(
                         game_id,
@@ -817,7 +817,7 @@ class GamebattleApi:
                         self.rating_system.launch_preloaded,
                     )
                 )
-            game = await self.manager.get_game(owner, session_id, game_id)
+            game = self.manager.get_game(owner, session_id, game_id)
             report = Report(session_id, short_reason, reason, output, owner)
             accumulated_reports = await self.rating_system.report(game.metadata, report)
             if accumulated_reports:
