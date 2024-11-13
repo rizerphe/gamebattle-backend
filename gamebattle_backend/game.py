@@ -41,17 +41,15 @@ class Game:
             meta (GameMeta): The metadata of the game
             client (DockerClient): The docker client to use
         """
-        container = await asyncio.get_event_loop().run_in_executor(
-            None, Container.start, meta.container_name, client
-        )
+        container = await Container.start(meta.container_name, client)
         return Game(metadata=meta, container=container, client=client)
 
     async def restart(self) -> None:
         """Restart the game."""
         self.switching_over_allowed = False
         await self.container.kill()
-        self.container = await asyncio.get_event_loop().run_in_executor(
-            None, Container.start, self.metadata.container_name, self.client
+        self.container = await Container.start(
+            self.metadata.container_name, self.client
         )
         self.switching_over_allowed = True
 

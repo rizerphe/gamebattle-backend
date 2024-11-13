@@ -40,7 +40,7 @@ class Container:
                 self.container.kill("SIGKILL")
 
     @classmethod
-    def start(
+    async def start(
         cls,
         game: str,
         client: docker.DockerClient,
@@ -58,6 +58,7 @@ class Container:
         """
         resource_limits = resource_limits or Limits.default()
         # Create container
+        print(f"Starting container for {game}", flush=True)
         container = client.containers.create(
             game,
             detach=True,
@@ -68,6 +69,7 @@ class Container:
             stdin_open=True,
             tty=True,
         )
+        print(f"Started container for {game}", flush=True)
         return cls(container)
 
     async def send(self, message: str) -> None:
