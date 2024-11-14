@@ -366,11 +366,11 @@ class GamebattleApi:
             websocket: The websocket.
             game_socket: The game's websocket.
         """
-        async for message in game.receive():
-            await websocket.send_json({"type": "stdout", "data": message})
-        await asyncio.sleep(0.1)
-        if not game.running:
-            await websocket.send_json({"type": "bye"})
+        while game.running:
+            async for message in game.receive():
+                await websocket.send_json({"type": "stdout", "data": message})
+            await asyncio.sleep(0.1)
+        await websocket.send_json({"type": "bye"})
         await websocket.close()
 
     def add_game_file(
