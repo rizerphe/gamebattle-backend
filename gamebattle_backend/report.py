@@ -1,7 +1,8 @@
 """Report dataclass"""
+
+import uuid
 from dataclasses import dataclass
 from typing import Literal
-import uuid
 
 
 @dataclass
@@ -11,5 +12,5 @@ class Report:
     session: uuid.UUID
     short_reason: Literal["unclear", "buggy", "other"]
     reason: str
-    output: str
+    output: str | None
     author: str

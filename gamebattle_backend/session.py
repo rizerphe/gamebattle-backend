@@ -1,13 +1,17 @@
 """A session containing two competing games."""
+
 from __future__ import annotations
-from dataclasses import dataclass, field
+
 import random
 import time
-from typing import Protocol, TypeVar
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Protocol, TypeVar
 
 from .common import GameMeta
 from .game import Game
-from .launcher import Launcher, launch_randomly
+
+if TYPE_CHECKING:
+    from .launcher import Launcher
 
 
 @dataclass
@@ -19,22 +23,21 @@ class SessionPublic:
     games: list[dict]
 
 
-LauncherType = TypeVar("LauncherType", bound="Launcher")
+LauncherType_contra = TypeVar(
+    "LauncherType_contra", bound="Launcher", contravariant=True
+)
 
 
-class LaunchStrategy(Protocol[LauncherType]):
+class LaunchStrategy(Protocol[LauncherType_contra]):
     """A strategy for picking N games to launch."""
 
     async def __call__(
-        self, launcher: LauncherType, capacity: int, owner: str
-    ) -> list[GameMeta]:
-        """Pick N games to launch.
-
-        Args:
-            launcher (Launcher): The launcher to use
-            capacity (int): The number of games to launch
-            owner (str): The owner of the session
-        """
+        self,
+        launcher: LauncherType_contra,
+        capacity: int,
+        owner: str,
+        avoid: frozenset[str] = frozenset(),
+    ) -> list[GameMeta]: ...
 
 
 @dataclass
@@ -49,22 +52,20 @@ class Session:
     async def launch(
         cls,
         owner: str,
-        launcher: LauncherType,
-        strategy: LaunchStrategy[LauncherType] = launch_randomly,
+        launcher: LauncherType_contra,
+        strategy: LaunchStrategy[LauncherType_contra],
         capacity: int = 2,
     ) -> Session:
         """Launch a session.
 
         Args:
             owner (str): The owner of the session
-            launcher (LauncherType): The launcher to use
+            launcher (LauncherType_contra): The launcher to use
             strategy (LaunchStrategy): The strategy to use to pick games.
-                Defaults to launch_randomly.
             capacity (int): The number of games to launch. Defaults to 2.
         """
         games = [
-            await launcher.start_game(game)
-            for game in await strategy(launcher, capacity, owner)
+            await Game.start(game) for game in await strategy(launcher, capacity, owner)
         ]
         random.shuffle(games)
         return Session(
@@ -80,7 +81,7 @@ class Session:
     @property
     def over(self) -> bool:
         """Return whether the session is over."""
-        return all(game.over for game in self.games)
+        return all(game.public.over for game in self.games)
 
     @property
     def public(self) -> SessionPublic:
@@ -95,18 +96,25 @@ class Session:
         self,
         game_id: int,
         owner: str,
-        launcher: LauncherType,
-        strategy: LaunchStrategy[LauncherType] = launch_randomly,
+        launcher: LauncherType_contra,
+        strategy: LaunchStrategy[LauncherType_contra],
     ) -> None:
         """Replace a game in the session.
 
         Args:
             game_id (int): The id of the game to replace
             owner (str): The owner of the session
-            launcher (LauncherType): The launcher to use
+            launcher (LauncherType_contra): The launcher to use
             strategy (LaunchStrategy): The strategy to use to pick a game.
         """
         await self.games[game_id].stop()
-        self.games[game_id] = await launcher.start_game(
-            (await strategy(launcher, 1, owner))[0]
+        self.games[game_id] = await Game.start(
+            (
+                await strategy(
+                    launcher,
+                    1,
+                    owner,
+                    avoid=frozenset(game.metadata.email for game in self.games),
+                )
+            )[0]
         )

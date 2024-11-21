@@ -33,8 +33,8 @@ class GameMeta:
     email: str
 
     @property
-    def container_name(self) -> str:
-        """The name of the container."""
+    def image_name(self) -> str:
+        """The name of the image."""
         formatted_name = self.folder_name.lower().replace(" ", "-")
         return f"gamebattle-{formatted_name}"
 

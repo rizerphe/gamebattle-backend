@@ -1,6 +1,7 @@
 """The API server for the application."""
 
 import asyncio
+import base64
 import contextlib
 import csv
 import os
@@ -29,7 +30,7 @@ from gamebattle_backend.report_store_redis import RedisReportStore
 from .auth import User, verify, verify_user
 from .common import GameMeta
 from .game import Game
-from .launcher import GamebattleError, Prelauncher, launch_own, launch_specified
+from .launcher import GamebattleError, Launcher, launch_own, launch_specified
 from .manager import Manager, TooManySessionsError
 from .session import SessionPublic
 
@@ -150,10 +151,8 @@ class GamebattleApi:
         """
         self.preference_store = preference_store
         self.rating_system = rating_system
-        self.launcher = Prelauncher(
+        self.launcher = Launcher(
             games_path,
-            prelaunch=4 if enable_competition else 0,
-            prelaunch_strategy=rating_system.launch,
         )
         self.manager = Manager(self.launcher)
         self.enable_competition = enable_competition
@@ -203,7 +202,7 @@ class GamebattleApi:
             )
         try:
             session = await self.manager.create_session(
-                owner, launch_strategy=self.rating_system.launch_preloaded
+                owner, launch_strategy=self.rating_system.launch
             )
             return session[0]
         except TooManySessionsError:
@@ -237,9 +236,9 @@ class GamebattleApi:
                 await self.manager.stop_session(session_id, owner)
             session_id, session = await self.manager.create_session(
                 owner,
-                launch_strategy=launch_own
-                if game_id is None
-                else launch_specified(game_id),
+                launch_strategy=(
+                    launch_own if game_id is None else launch_specified(game_id)
+                ),
                 capacity=1,
             )
             return session_id
@@ -309,13 +308,6 @@ class GamebattleApi:
             return
         try:
             game = self.manager.get_game(owner, session_id, game_id)
-            if not game.running:
-                await websocket.send_json(
-                    {"type": "stdout", "data": game.accumulated_stdout}
-                )
-                await websocket.send_json({"type": "bye"})
-                await websocket.close()
-                return
             await asyncio.wait(
                 [
                     asyncio.create_task(self._ws_send(websocket, game)),
@@ -347,7 +339,8 @@ class GamebattleApi:
                     data = message.get("data")
                     if not isinstance(data, str):
                         continue
-                    await game.send(message.get("data", ""))
+                    # B64-decode the received data:
+                    await game.send(base64.b64decode(data))
                 elif message.get("type") == "resize":
                     rows = message.get("rows")
                     cols = message.get("cols")
@@ -366,10 +359,10 @@ class GamebattleApi:
             websocket: The websocket.
             game_socket: The game's websocket.
         """
-        while game.running:
-            async for message in game.receive():
-                await websocket.send_json({"type": "stdout", "data": message})
-            await asyncio.sleep(0.1)
+        async for message in game.receive():
+            await websocket.send_json(
+                {"type": "stdout", "data": base64.b64encode(message).decode()}
+            )
         await websocket.send_json({"type": "bye"})
         await websocket.close()
 
@@ -519,7 +512,7 @@ class GamebattleApi:
             )
         return self.launcher.get_game_metadata(self.launcher[game_id].email)
 
-    def build_game(
+    async def build_game(
         self,
         name: str = fastapi.Body(...),
         file: str = fastapi.Body(...),
@@ -548,7 +541,7 @@ class GamebattleApi:
             file,
             owner.email if game_id is None else self.launcher[game_id].email,
         )
-        self.launcher.build_game(metadata)
+        await self.launcher.build_game(metadata)
 
     async def stats(
         self,
@@ -600,12 +593,14 @@ class GamebattleApi:
             started=self.enable_competition,
             elo=score,
             max_elo=top[0].score if top else 1,
-            place=next(
-                (i + 1 for i, rating in enumerate(top) if score >= rating.score),
-                None,
-            )
-            if score
-            else len(top),
+            place=(
+                next(
+                    (i + 1 for i, rating in enumerate(top) if score >= rating.score),
+                    None,
+                )
+                if score
+                else len(top)
+            ),
             places=len(top) or 1,
             accumulation=await self.preference_store.accumulation_of_preferences_by(
                 game_owner
@@ -738,9 +733,11 @@ class GamebattleApi:
                         {
                             "title": f"Game reported: {game.name}",
                             "description": report.reason,
-                            "color": (0xFF0000 if report.reason else 0xFFFF00)
-                            if accumulated_reports > 3
-                            else 0x00FF00,
+                            "color": (
+                                (0xFF0000 if report.reason else 0xFFFF00)
+                                if accumulated_reports > 3
+                                else 0x00FF00
+                            ),
                             "fields": [
                                 {
                                     "name": "Game",
@@ -784,7 +781,7 @@ class GamebattleApi:
         game_id: int,
         short_reason: Literal["unclear", "buggy", "other"] = fastapi.Body(...),
         reason: str = fastapi.Body(embed=True),
-        output: str = fastapi.Body(embed=True),
+        capture_output: bool = fastapi.Body(embed=True),
         restart_game: bool = fastapi.Body(False, embed=True),
         owner: str = fastapi.Depends(firebase_email),
     ) -> None:
@@ -794,7 +791,7 @@ class GamebattleApi:
             session_id: The session ID.
             game_id: The game ID.
             reason: The reason of the report.
-            output: The output of the game.
+            capture_output: Whether to capture the output.
             restart_game: Whether to restart the game.
             owner: The user ID of the session owner.
         """
@@ -814,10 +811,16 @@ class GamebattleApi:
                         game_id,
                         owner,
                         self.launcher,
-                        self.rating_system.launch_preloaded,
+                        self.rating_system.launch,
                     )
                 )
             game = self.manager.get_game(owner, session_id, game_id)
+
+            output: str | None = None
+
+            if capture_output:
+                output = base64.b64encode(game.accumulated_output).decode()
+
             report = Report(session_id, short_reason, reason, output, owner)
             accumulated_reports = await self.rating_system.report(game.metadata, report)
             if accumulated_reports:
@@ -895,17 +898,15 @@ class GamebattleApi:
 
     async def setup(self):
         """Setup the API server."""
-        await self.launcher.prelaunch_games()
-        await self.launcher.start_generating_summaries()
+        await self.launcher.start()
+        if not self.enable_competition:
+            await self.launcher.start_generating_summaries()
         await self.preference_store.bind(self.rating_system)
 
     async def shutdown(self):
         """Shutdown the API server."""
         for session in self.manager.sessions.values():
             await session.stop()
-        for games in self.launcher.prelaunched.values():
-            for game in games:
-                await game.stop()
 
 
 def launch_app() -> fastapi.FastAPI:

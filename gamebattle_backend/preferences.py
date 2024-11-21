@@ -1,14 +1,15 @@
 """A store for game preferences"""
+
 from __future__ import annotations
-from dataclasses import dataclass, field
+
 import operator
-import random
 import time
-from typing import AsyncIterator, Protocol
 import uuid
+from dataclasses import dataclass, field
+from typing import AsyncIterator, Protocol
 
 from gamebattle_backend.common import GameMeta
-from gamebattle_backend.launcher import Launcher, Prelauncher
+from gamebattle_backend.launcher import Launcher
 
 from .report import Report
 from .session import Session
@@ -127,12 +128,15 @@ class RatingSystem(Protocol):
         Args:
             preference (Preference): The preference to register
         """
+        ...
 
     async def clear(self) -> None:
         """Clear the rating system."""
+        ...
 
     def top(self, launcher: Launcher) -> AsyncIterator[Rating]:
         """Get the top games."""
+        ...
 
     async def score(self, game: str) -> float:
         """Get the score of a game.
@@ -140,6 +144,7 @@ class RatingSystem(Protocol):
         Args:
             game (str): The game to get the score of
         """
+        ...
 
 
 class EloRatingSystem:
@@ -148,7 +153,6 @@ class EloRatingSystem:
         self.initial = initial
         self.ratings: dict[str, float] = {}
         self.runs: dict[str, int] = {}
-        self.planned_pairs: set[frozenset[str]] = set()
         self.reports: ReportStore = reports
 
     async def clear(self) -> None:
@@ -184,6 +188,7 @@ class EloRatingSystem:
             (
                 Rating(launcher[game].name, score)
                 for game, score in self.ratings.items()
+                if game in launcher
             ),
             key=operator.attrgetter("score"),
             reverse=True,
@@ -203,17 +208,22 @@ class EloRatingSystem:
         return self.ratings.get(game), self.runs.get(game, 0)
 
     async def launch(
-        self, launcher: Launcher, capacity: int, owner: str
+        self,
+        launcher: Launcher,
+        capacity: int,
+        owner: str,
+        avoid: frozenset[str] = frozenset(),
     ) -> list[GameMeta]:
-        available = [game for game in launcher.games if game.email != owner]
-        if capacity % 2:
-            capacity += 1
+        available = [
+            game
+            for game in launcher.games
+            if game.email != owner and game.email not in avoid
+        ]
+        for game in available:
+            if owner in [report.author for report in await self.reports.get(game.id)]:
+                available.remove(game)
         game_pairs = [
-            (game, other)
-            for game in available
-            for other in available
-            if game != other
-            and frozenset({game.id, other.id}) not in self.planned_pairs
+            (game, other) for game in available for other in available if game != other
         ]
         if not game_pairs:
             return []
@@ -221,45 +231,14 @@ class EloRatingSystem:
             key=lambda pair: self.pair_likelihood(pair[0].id, pair[1].id),
             reverse=True,
         )
-        self.planned_pairs.update(
-            frozenset({game_pair[0].id, game_pair[1].id})
-            for game_pair in game_pairs[: capacity // 2]
-        )
-        return [game for pair in game_pairs[: capacity // 2] for game in pair]
+        return ([game for pair in game_pairs for game in pair] + launcher.games)[
+            :capacity
+        ]
 
     def pair_likelihood(self, game: str, other: str) -> float:
         return abs(
             self.ratings.get(game, self.initial) - self.ratings.get(other, self.initial)
         ) / 200 - (self.runs.get(game, 0) + self.runs.get(other, 0))
-
-    async def launch_preloaded(
-        self, launcher: Prelauncher, capacity: int, owner: str
-    ) -> list[GameMeta]:
-        available = [game for game in launcher.games if game.email != owner]
-        random.shuffle(available)
-        for game in available:
-            if owner in [report.author for report in await self.reports.get(game.id)]:
-                available.remove(game)
-        game_pairs = [
-            (game, other) for game in available for other in available if game != other
-        ]
-        game_pairs.sort(
-            key=lambda pair: self.pair_likelihood(pair[0].id, pair[1].id),
-            reverse=True,
-        )
-        planned_game_pairs = [
-            pair for pair in game_pairs if frozenset({pair[0].id, pair[1].id})
-        ]
-        pairs_to_launch = (
-            planned_game_pairs + game_pairs[: capacity // 2 - len(planned_game_pairs)]
-        )
-        for pair in pairs_to_launch:
-            frozen = frozenset({pair[0].id, pair[1].id})
-            if frozen in self.planned_pairs:
-                self.planned_pairs.remove(frozen)
-        return ([game for pair in pairs_to_launch for game in pair] + launcher.games)[
-            :capacity
-        ]
 
     async def report(self, game: GameMeta, report: Report) -> int | None:
         if game.email == report.author:
@@ -271,7 +250,7 @@ class EloRatingSystem:
 
 
 class RAMPreferenceStore:
-    def __init__(self):
+    def __init__(self) -> None:
         self.preferences: dict[uuid.UUID, Preference] = {}
         self.rating_systems: list[RatingSystem] = []
 

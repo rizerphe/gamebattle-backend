@@ -4,7 +4,7 @@ from groq import AsyncGroq, RateLimitError
 
 
 class Summarizer:
-    def __init__(self):
+    def __init__(self) -> None:
         self.client = AsyncGroq()
         self.summaries: dict[str, str] = {}
         self.in_progress: dict[str, asyncio.Task] = {}

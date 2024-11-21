@@ -3,15 +3,13 @@ responsible for managing a game's metadata."""
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, AsyncIterator
+from typing import AsyncIterator
+
+from starlette.background import P
 
 from .common import GameMeta
-from .containers import Container
-
-if TYPE_CHECKING:
-    from docker import DockerClient
+from .container import Container
 
 
 @dataclass
@@ -28,45 +26,24 @@ class Game:
 
     metadata: GameMeta
     container: Container
-    client: DockerClient
-
-    over: bool = False  # TODO: make this more robust to game restarts
-    switching_over_allowed: bool = True
 
     @classmethod
-    async def start(cls, meta: GameMeta, client: DockerClient) -> Game:
-        """Start a game.
-
-        Args:
-            meta (GameMeta): The metadata of the game
-            client (DockerClient): The docker client to use
-        """
-        container = await Container.start(meta.container_name, client)
-        return Game(metadata=meta, container=container, client=client)
+    async def start(cls, meta: GameMeta) -> Game:
+        """Start a new game with the given metadata."""
+        container = Container(meta.image_name)
+        await container.start()
+        return cls(meta, container)
 
     async def restart(self) -> None:
-        """Restart the game."""
-        self.switching_over_allowed = False
-        await self.container.kill()
-        self.container = await Container.start(
-            self.metadata.container_name, self.client
-        )
-        self.switching_over_allowed = True
+        await self.container.stop()
+        self.container = Container(self.metadata.image_name)
+        await self.container.start()
 
     async def stop(self) -> None:
         """Stop the game."""
-        await self.container.try_kill()
+        await self.container.stop()
 
-    @property
-    def running(self) -> bool:
-        """Return whether the game is running."""
-        if self.container.running:
-            return True
-        if self.switching_over_allowed:
-            self.over = True
-        return False
-
-    async def send(self, messsage: str) -> None:
+    async def send(self, messsage: bytes) -> None:
         """Send a message to the game."""
         await self.container.send(messsage)
 
@@ -74,17 +51,19 @@ class Game:
         """Resize the game."""
         await self.container.resize(width, height)
 
-    async def receive(self) -> AsyncIterator[str]:
-        """Receive a message from the game."""
+    async def receive(self) -> AsyncIterator[bytes]:
+        """Receive messages from the game."""
         async for message in self.container.receive():
-            yield message
+            yield message.content
+
+    @property
+    def accumulated_output(self) -> bytes:
+        """The accumulated output of the game."""
+        return b"".join(
+            output.content for output in self.container.receive().accumulated
+        )
 
     @property
     def public(self) -> GamePublic:
-        """Return the public interface of the game."""
-        return GamePublic(name=self.metadata.name, over=self.over)
-
-    @property
-    def accumulated_stdout(self) -> str | None:
-        """Return all the accumulated stdout."""
-        return self.container.accumulated_stdout
+        """The public interface of the game."""
+        return GamePublic(self.metadata.name, not self.container.running)

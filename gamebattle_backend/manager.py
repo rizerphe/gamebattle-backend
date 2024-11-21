@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from gamebattle_backend.game import Game
 
-from .session import LaunchStrategy, Session, launch_randomly
+from .session import LaunchStrategy, Session
 
 if TYPE_CHECKING:
     from .launcher import Launcher
@@ -95,7 +95,7 @@ class Manager:
     async def create_session(
         self,
         owner: str,
-        launch_strategy: LaunchStrategy = launch_randomly,
+        launch_strategy: LaunchStrategy,
         capacity: int = 2,
     ) -> tuple[uuid.UUID, Session]:
         """Create a session.
