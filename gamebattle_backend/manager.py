@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -104,7 +106,6 @@ class Manager:
             owner: The user ID of the session owner.
             launch_strategy: The launch strategy to use.
             capacity: The number of games to launch.
-
         Raises:
             TooManySessionsError: If the user already has too many sessions.
         """
@@ -115,7 +116,21 @@ class Manager:
         )
         id_ = uuid.uuid4()
         self.sessions[id_] = session
+
+        # Schedule deletion in an hour:
+        loop = asyncio.get_event_loop()
+        loop.call_later(3600, self.try_stop_session, id_)
+
         return id_, session
+
+    async def try_stop_session(self, session_id: uuid.UUID) -> None:
+        """Try to stop a session.
+
+        Args:
+            session_id: The session ID.
+        """
+        with contextlib.suppress(KeyError):
+            await self.stop_session(session_id)
 
     async def stop_session(
         self, session_id: uuid.UUID, owner: str | None = None
