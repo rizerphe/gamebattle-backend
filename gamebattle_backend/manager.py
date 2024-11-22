@@ -118,8 +118,11 @@ class Manager:
         self.sessions[id_] = session
 
         # Schedule deletion in an hour:
-        loop = asyncio.get_event_loop()
-        loop.call_later(3600, self.try_stop_session, id_)
+        async def wait_and_delete():
+            await asyncio.sleep(3600)
+            await self.try_stop_session(id_)
+
+        asyncio.create_task(wait_and_delete())
 
         return id_, session
 
