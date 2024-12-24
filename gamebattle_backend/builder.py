@@ -61,7 +61,7 @@ class GameBuilder:
 
     async def build(self, metadata: GameMeta) -> None:
         """Build a game."""
-        app_path = os.path.join(self._games_path, metadata.id)
+        app_path = os.path.join(self._games_path, metadata.team_id)
         await build_app(app_path, metadata.file, metadata.image_name)
 
     async def scan(self) -> list[GameMeta]:
@@ -75,7 +75,7 @@ class GameBuilder:
                 games.append(game)
 
                 print(
-                    f"[{i + 1}/{len(indexes)}] Building {game.name} by {game.email}",
+                    f"[{i + 1}/{len(indexes)}] Building {game.name} by {game.team_id}",
                     flush=True,
                 )
                 await self.build(game)

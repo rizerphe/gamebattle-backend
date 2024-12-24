@@ -12,7 +12,7 @@ from dataclasses import asdict
 import yaml
 
 from .builder import GameBuilder
-from .common import GameMeta
+from .common import GameMeta, TeamManager
 from .session import LaunchStrategy
 from .summarize import Summarizer
 
@@ -38,12 +38,12 @@ async def launch_randomly(
     Args:
         launcher (Launcher): The launcher to use
         capacity (int): The number of games to launch
-        owner (str): The owner of the session
+        owner (str): The owner of the session (the email)
     """
     available = [
         game
         for game in launcher.games
-        if game.email != owner and game.email not in avoid
+        if not launcher.allowed_access(game, owner) and game.team_id not in avoid
     ]
     return available and random.sample(available, capacity)
 
@@ -63,7 +63,9 @@ async def launch_own(
     """
     if capacity > 1:
         raise GamebattleError("Can only own one game at a time")
-    available = [game for game in launcher.games if game.email == owner]
+    available = [
+        game for game in launcher.games if launcher.allowed_access(game, owner)
+    ]
     if not available:
         raise GamebattleError("No games available")
     return random.sample(available, capacity)
@@ -87,12 +89,26 @@ class Launcher:
     def __init__(
         self,
         games_path: str,
+        teams: TeamManager,
     ) -> None:
         self._games_path = games_path
         self._summarizer = Summarizer()
         self._builder = GameBuilder(games_path)
+        self._teams = teams
 
         self.games: list[GameMeta] = []
+
+    def allowed_access(self, game: GameMeta, owner: str) -> bool:
+        """Check if the owner has access to the game.
+
+        Args:
+            game (GameMeta): The game
+            owner (str): The owner of the session
+
+        Returns:
+            bool: Whether the owner has access to the game
+        """
+        return game.allowed_access(owner, self._teams)
 
     async def start(self) -> None:
         """Scan the games folder for games."""
@@ -146,23 +162,27 @@ class Launcher:
     async def build_game(self, metadata: GameMeta) -> None:
         if not self.check_file_name(metadata.file, strict=True):
             return
+        if not metadata.team_id:
+            return
         self.save_metadata(metadata)
         await self._builder.build(metadata)
-        self.games = [x for x in self.games if x.email != metadata.email] + [metadata]
+        self.games = [x for x in self.games if x.team_id != metadata.team_id] + [
+            metadata
+        ]
 
-    def __getitem__(self, game_id: str, /) -> GameMeta:
+    def __getitem__(self, team_id: str, /) -> GameMeta:
         for game in self.games:
-            if game.id == game_id:
+            if game.team_id == team_id:
                 return game
-        raise KeyError(game_id)
+        raise KeyError(team_id)
 
     def add_game_file(
-        self, owner: str, game_file_content: bytes, filename: str
+        self, team_id: str, game_file_content: bytes, filename: str
     ) -> None:
         """Add a game file to the manager.
 
         Args:
-            owner (str): The owner of the game
+            team_id (str): The ID of the team
             game_file_content (str): The content of the game file
             filename (str): The name of the file
         """
@@ -170,14 +190,14 @@ class Launcher:
             raise GamebattleError("Invalid file name")
         if len(game_file_content) > 128 * 1024:
             raise GamebattleError("File too large")
-        if len(self.get_game_files(owner)) > 64:
+        if len(self.get_game_files(team_id)) > 64:
             raise GamebattleError("Too many files")
 
         # Recursively create the folder (including the sections of the file's path)
         os.makedirs(
             os.path.join(
                 self._games_path,
-                GameMeta.folder_name_for(owner),
+                team_id,
                 os.path.dirname(filename),
             ),
             exist_ok=True,
@@ -185,67 +205,62 @@ class Launcher:
 
         # Write the game file:
         with open(
-            os.path.join(self._games_path, GameMeta.folder_name_for(owner), filename),
+            os.path.join(self._games_path, team_id, filename),
             "wb",
         ) as file:
             file.write(game_file_content)
 
-    def remove_game_file(self, owner: str, filename: str) -> None:
+    def remove_game_file(self, team_id: str, filename: str) -> None:
         """Delete a game file from the manager.
 
         Args:
-            owner (str): The owner of the game
+            team_id (str): The ID of the team
             filename (str): The name of the file
         """
         if not self.check_file_name(filename):
             raise GamebattleError("Invalid file name")
         try:
-            os.remove(
-                os.path.join(
-                    self._games_path, GameMeta.folder_name_for(owner), filename
-                )
-            )
+            os.remove(os.path.join(self._games_path, team_id, filename))
             # And recursively remove all empty dirs
-            for root, _, _ in os.walk(
-                os.path.join(self._games_path, GameMeta.folder_name_for(owner))
-            ):
+            for root, _, _ in os.walk(os.path.join(self._games_path, team_id)):
                 if not os.listdir(root):
                     os.rmdir(root)
         except FileNotFoundError:
             pass
 
-    def get_game_files(self, owner: str) -> dict[str, bytes]:
+    def get_game_files(self, team_id: str) -> dict[str, bytes]:
         """Recursively get the game files of a game.
 
         Args:
-            owner (str): The owner of the game
+            team_id (str): The ID of the team
 
         Returns:
             dict[str, str]: The game files
         """
         files: dict[str, bytes] = {}
         for root, _, filenames in os.walk(
-            os.path.join(self._games_path, GameMeta.folder_name_for(owner))
+            os.path.join(self._games_path, team_id),
         ):
             for filename in filenames:
                 with open(os.path.join(root, filename), "rb") as file:
                     relative_path = os.path.relpath(
                         os.path.join(root, filename),
-                        os.path.join(self._games_path, GameMeta.folder_name_for(owner)),
+                        os.path.join(self._games_path, team_id),
                     )
                     files[relative_path] = file.read()
         return files
 
-    async def get_game_summary(self, owner: str) -> str:
+    async def get_game_summary(self, team_id: str) -> str:
         """Get an one-line AI-generated summary of a game.
 
         Args:
-            owner (str): The owner of the game
+            team_id (str): The ID of the team
         """
         # Get the entrypoint file
-        files = self.get_game_files(owner)
-        metadata = self.get_game_metadata(owner)
-        if metadata is None:
+        files = self.get_game_files(team_id)
+        try:
+            metadata = self[team_id]
+        except KeyError:
             return "Get started by creating a game"
         if metadata.file not in files:
             return "Time to specify the entrypoint file!"
@@ -260,28 +275,14 @@ class Launcher:
             metadata (GameMeta): The metadata of the game
         """
         with open(
-            os.path.join(self._games_path, metadata.folder_name + ".yaml"),
+            os.path.join(self._games_path, metadata.team_id + ".yaml"),
             "w",
             encoding="utf-8",
         ) as file:
             yaml.safe_dump(asdict(metadata), file)
 
-    def get_game_metadata(self, owner: str) -> GameMeta | None:
-        """Get the metadata of a game.
-
-        Args:
-            owner (str): The owner of the game
-
-        Returns:
-            GameMeta: The metadata of the game
-        """
-        found = [x for x in self.games if x.email == owner]
-        if len(found) == 0:
-            return None
-        return found[0]
-
-    def __contains__(self, game_id: str) -> bool:
-        return any(game.id == game_id for game in self.games)
+    def __contains__(self, team_id: str) -> bool:
+        return any(game.team_id == team_id for game in self.games)
 
     async def start_generating_summaries(self):
         """Start generating summaries."""
@@ -293,14 +294,15 @@ class Launcher:
         """
         print("Starting to generate summaries", flush=True)
         while True:
-            owners = [game.email for game in self.games]
-            random.shuffle(owners)
+            teams = [game.team_id for game in self.games]
+            random.shuffle(teams)
 
             # Find first game that needs a summary
-            for owner in owners:
-                files = self.get_game_files(owner)
-                metadata = self.get_game_metadata(owner)
-                if metadata is None:
+            for team_id in teams:
+                files = self.get_game_files(team_id)
+                try:
+                    metadata = self[team_id]
+                except KeyError:
                     continue
                 if metadata.file not in files:
                     continue
@@ -313,7 +315,7 @@ class Launcher:
 
                 with contextlib.suppress(Exception):
                     print(
-                        f"Generating summary for {metadata.email}'s game {metadata.name}",
+                        f"Generating summary for {metadata.team_id}'s game {metadata.name}",
                         flush=True,
                     )
                     await self._summarizer.summarize(file_content, strong=False)

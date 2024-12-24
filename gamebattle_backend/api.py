@@ -28,7 +28,7 @@ from gamebattle_backend.preferences import (
 from gamebattle_backend.report_store_redis import RedisReportStore
 
 from .auth import User, verify, verify_user
-from .common import GameMeta
+from .common import GameMeta, TeamManager
 from .game import Game
 from .launcher import GamebattleError, Launcher, launch_own, launch_specified
 from .manager import Manager, TooManySessionsError
@@ -136,6 +136,7 @@ class GamebattleApi:
     def __init__(
         self,
         games_path: str,
+        teams_path: str,
         preference_store: PreferenceStore,
         rating_system: EloRatingSystem,
         enable_competition: bool = True,
@@ -151,8 +152,11 @@ class GamebattleApi:
         """
         self.preference_store = preference_store
         self.rating_system = rating_system
+        self.teams = TeamManager()
+        self.teams.from_yaml(teams_path)
         self.launcher = Launcher(
             games_path,
+            self.teams,
         )
         self.manager = Manager(self.launcher)
         self.enable_competition = enable_competition
@@ -370,7 +374,7 @@ class GamebattleApi:
         self,
         content: bytes = fastapi.Body(...),
         filename: str = fastapi.Body(...),
-        game_id: str | None = fastapi.Body(None),
+        team_id: str | None = fastapi.Body(None),
         owner: str = fastapi.Depends(firebase_email),
     ) -> None:
         """Add a game file.
@@ -378,10 +382,10 @@ class GamebattleApi:
         Args:
             content: The file content.
             filename: The file name.
-            game_id: The id of the game to modify (admin only)
+            team_id: The team ID of the game owner.
             owner: The user ID of the session owner.
         """
-        if game_id is not None and owner not in self.admin_emails:
+        if team_id is not None and owner not in self.admin_emails:
             raise fastapi.HTTPException(
                 status_code=400, detail="Cannot specify game ID."
             )
@@ -389,9 +393,18 @@ class GamebattleApi:
             raise fastapi.HTTPException(
                 status_code=400, detail="Competition mode is disabled."
             )
+
+        if team_id is None:
+            team = self.teams.team_of(owner)
+            if team is None:
+                raise fastapi.HTTPException(
+                    status_code=400, detail="You are not in a team."
+                )
+            team_id = team.id
+
         try:
             self.launcher.add_game_file(
-                owner if game_id is None else self.launcher[game_id].email,
+                team_id,
                 content,
                 filename,
             )
@@ -413,14 +426,19 @@ class GamebattleApi:
             raise fastapi.HTTPException(
                 status_code=400, detail="Competition mode is disabled."
             )
+        team = self.teams.team_of(owner)
+        if team is None:
+            raise fastapi.HTTPException(
+                status_code=400, detail="You are not in a team."
+            )
         try:
-            self.launcher.remove_game_file(owner, filename)
+            self.launcher.remove_game_file(team.id, filename)
         except GamebattleError as e:
             raise fastapi.HTTPException(status_code=400, detail=e.message)
 
     def admin_remove_game_file(
         self,
-        game_id: str,
+        team_id: str,
         filename: str,
         owner: str = fastapi.Depends(firebase_email),
     ) -> None:
@@ -436,7 +454,7 @@ class GamebattleApi:
                 status_code=400, detail="Cannot specify game ID."
             )
         try:
-            self.launcher.remove_game_file(self.launcher[game_id].email, filename)
+            self.launcher.remove_game_file(team_id, filename)
         except GamebattleError as e:
             raise fastapi.HTTPException(status_code=400, detail=e.message)
 
@@ -453,20 +471,25 @@ class GamebattleApi:
             raise fastapi.HTTPException(
                 status_code=400, detail="Competition mode is disabled."
             )
+        team = self.teams.team_of(owner)
+        if team is None:
+            raise fastapi.HTTPException(
+                status_code=400, detail="You are not in a team."
+            )
         return [
             File(path, content)
-            for path, content in self.launcher.get_game_files(owner).items()
+            for path, content in self.launcher.get_game_files(team.id).items()
         ]
 
     def admin_get_game_files(
         self,
-        game_id: str,
+        team_id: str,
         owner: str = fastapi.Depends(firebase_email),
     ) -> list[File]:
         """List game files (admin only).
 
         Args:
-            game_id: The id of the game to modify.
+            team_id: The id of the team to fetch (admin only)
             owner: The user ID of the session owner.
         """
         if owner not in self.admin_emails:
@@ -475,9 +498,7 @@ class GamebattleApi:
             )
         return [
             File(path, content)
-            for path, content in self.launcher.get_game_files(
-                self.launcher[game_id].email
-            ).items()
+            for path, content in self.launcher.get_game_files(team_id).items()
         ]
 
     def get_game_metadata(
@@ -493,24 +514,33 @@ class GamebattleApi:
             raise fastapi.HTTPException(
                 status_code=400, detail="Competition mode is disabled."
             )
-        return self.launcher.get_game_metadata(owner)
+        team = self.teams.team_of(owner)
+        if team is None:
+            return None
+        try:
+            return self.launcher[team.id]
+        except KeyError:
+            return None
 
     def admin_get_game_metadata(
         self,
-        game_id: str,
+        team_id: str,
         owner: str = fastapi.Depends(firebase_email),
     ) -> GameMeta | None:
         """Get game metadata.
 
         Args:
-            game_id: The id of the game to fetch (admin only)
+            team_id: The id of the game to fetch (admin only)
             owner: The user ID of the session owner.
         """
         if owner not in self.admin_emails:
             raise fastapi.HTTPException(
                 status_code=400, detail="Cannot specify game ID."
             )
-        return self.launcher.get_game_metadata(self.launcher[game_id].email)
+        try:
+            return self.launcher[team_id]
+        except KeyError:
+            return None
 
     async def build_game(
         self,
@@ -535,11 +565,14 @@ class GamebattleApi:
             raise fastapi.HTTPException(
                 status_code=400, detail="Competition mode is disabled."
             )
+
+        owner_team = self.teams.team_of(owner.email)
+        owner_team_id = owner_team.id if owner_team else ""
+
         metadata = GameMeta(
             name,
-            owner.name if game_id is None else self.launcher[game_id].author,
+            owner_team_id if game_id is None else self.launcher[game_id].team_id,
             file,
-            owner.email if game_id is None else self.launcher[game_id].email,
         )
         await self.launcher.build_game(metadata)
 
@@ -553,10 +586,22 @@ class GamebattleApi:
             owner: The user ID of the session owner.
         """
         top = await self.leaderboard()
-        score, n_played = await self.rating_system.score_and_played(
-            GameMeta.id_for(owner)
-        )
-        reports = await self.rating_system.fetch_reports(GameMeta.id_for(owner))
+        team = self.teams.team_of(owner)
+        if team is None:
+            return Stats(
+                permitted=False,
+                started=self.enable_competition,
+                elo=None,
+                max_elo=top[0].score if top else 1,
+                place=None,
+                places=len(top) or 1,
+                accumulation=0,
+                required_accumulation=5,
+                reports=0,
+                times_played=0,
+            )
+        score, n_played = await self.rating_system.score_and_played(team.id)
+        reports = await self.rating_system.fetch_reports(team.id)
         return Stats(
             permitted=True,
             started=self.enable_competition,
@@ -577,51 +622,61 @@ class GamebattleApi:
 
     async def admin_stats(
         self,
-        game_id: str,
+        team_id: str,
         owner: str = fastapi.Depends(firebase_email),
-    ) -> Stats:
+    ) -> list[tuple[str, Stats]]:
         if owner not in self.admin_emails:
             raise fastapi.HTTPException(
                 status_code=400, detail="Cannot specify game ID."
             )
-        game_owner = self.launcher[game_id].email
         top = await self.leaderboard()
-        score, n_played = await self.rating_system.score_and_played_if_exists(game_id)
-        reports = await self.rating_system.fetch_reports(game_id)
-        return Stats(
-            permitted=True,
-            started=self.enable_competition,
-            elo=score,
-            max_elo=top[0].score if top else 1,
-            place=(
-                next(
-                    (i + 1 for i, rating in enumerate(top) if score >= rating.score),
-                    None,
-                )
-                if score
-                else len(top)
-            ),
-            places=len(top) or 1,
-            accumulation=await self.preference_store.accumulation_of_preferences_by(
-                game_owner
-            ),
-            required_accumulation=5,
-            reports=len(reports),
-            times_played=n_played,
-        )
+        score, n_played = await self.rating_system.score_and_played_if_exists(team_id)
+        reports = await self.rating_system.fetch_reports(team_id)
+        return [
+            (
+                player,
+                Stats(
+                    permitted=True,
+                    started=self.enable_competition,
+                    elo=score,
+                    max_elo=top[0].score if top else 1,
+                    place=(
+                        next(
+                            (
+                                i + 1
+                                for i, rating in enumerate(top)
+                                if score >= rating.score
+                            ),
+                            None,
+                        )
+                        if score
+                        else len(top)
+                    ),
+                    places=len(top) or 1,
+                    accumulation=await self.preference_store.accumulation_of_preferences_by(
+                        player
+                    ),
+                    required_accumulation=5,
+                    reports=len(reports),
+                    times_played=n_played,
+                ),
+            )
+            for player in self.teams[team_id].member_emails
+        ]
 
     async def admin_allstats(
         self,
         owner: str = fastapi.Depends(firebase_email),
-    ) -> list[tuple[GameMeta, Stats]]:
+    ) -> list[tuple[str, GameMeta, Stats]]:
         if owner not in self.admin_emails:
             raise fastapi.HTTPException(status_code=400, detail="Cannot get all stats.")
         return sorted(
             [
-                (game_meta, await self.admin_stats(game_meta.id, owner))
+                (player, game_meta, stats)
                 for game_meta in self.launcher.games
+                for player, stats in await self.admin_stats(game_meta.team_id, owner)
             ],
-            key=lambda x: x[0].author,
+            key=lambda x: x[0],
         )
 
     async def admin_allstats_csv(
@@ -631,8 +686,7 @@ class GamebattleApi:
         if owner not in self.admin_emails:
             raise fastapi.HTTPException(status_code=400, detail="Cannot get all stats.")
         fieldnames = [
-            "Author name",
-            "Author email",
+            "Team ID",
             "Game name",
             "Elo",
             "Place",
@@ -646,8 +700,7 @@ class GamebattleApi:
         for game_meta, stats in await self.admin_allstats(owner):
             writer.writerow(
                 {
-                    "Author name": game_meta.author,
-                    "Author email": game_meta.email,
+                    "Team ID": game_meta.team_id,
                     "Game name": game_meta.name,
                     "Elo": stats.elo,
                     "Place": stats.place,
@@ -670,7 +723,10 @@ class GamebattleApi:
         Args:
             owner: The user ID of the session owner.
         """
-        return await self.launcher.get_game_summary(owner)
+        team = self.teams.team_of(owner)
+        if team is None:
+            return "Ask the admins to make sure you are in a team."
+        return await self.launcher.get_game_summary(team.id)
 
     async def set_preference(
         self,
@@ -746,7 +802,7 @@ class GamebattleApi:
                                 },
                                 {
                                     "name": "Author",
-                                    "value": game.author,
+                                    "value": game.team_id,
                                     "inline": True,
                                 },
                                 {
@@ -829,7 +885,7 @@ class GamebattleApi:
                         game.metadata,
                         report,
                         accumulated_reports,
-                        game.metadata.id,
+                        game.metadata.team_id,
                     )
                 )
             await asyncio.gather(*tasks)
@@ -918,6 +974,7 @@ def launch_app() -> fastapi.FastAPI:
     )
     return GamebattleApi(
         os.environ["GAMES_PATH"],
+        os.environ["TEAMS_PATH"],
         RedisPreferenceStore(r),
         EloRatingSystem(RedisReportStore(r)),
         os.environ.get("ENABLE_COMPETITION") == "true",

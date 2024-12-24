@@ -114,7 +114,7 @@ class Session:
                     launcher,
                     1,
                     owner,
-                    avoid=frozenset(game.metadata.email for game in self.games),
+                    avoid=frozenset(game.metadata.team_id for game in self.games),
                 )
             )[0]
         )

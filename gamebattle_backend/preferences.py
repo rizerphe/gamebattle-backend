@@ -28,8 +28,8 @@ class Preference:
     async def from_session(cls, session: Session, first_score: float) -> Preference:
         return cls(
             (
-                session.games[0].metadata.id,
-                session.games[1].metadata.id,
+                session.games[0].metadata.team_id,
+                session.games[1].metadata.team_id,
             ),
             first_score,
             session.owner,
@@ -217,10 +217,12 @@ class EloRatingSystem:
         available = [
             game
             for game in launcher.games
-            if game.email != owner and game.email not in avoid
+            if not launcher.allowed_access(game, owner) and game.team_id not in avoid
         ]
         for game in available:
-            if owner in [report.author for report in await self.reports.get(game.id)]:
+            if owner in [
+                report.author for report in await self.reports.get(game.team_id)
+            ]:
                 available.remove(game)
         game_pairs = [
             (game, other) for game in available for other in available if game != other
@@ -228,7 +230,7 @@ class EloRatingSystem:
         if not game_pairs:
             return []
         game_pairs.sort(
-            key=lambda pair: self.pair_likelihood(pair[0].id, pair[1].id),
+            key=lambda pair: self.pair_likelihood(pair[0].team_id, pair[1].team_id),
             reverse=True,
         )
         return ([game for pair in game_pairs for game in pair] + launcher.games)[
@@ -241,9 +243,7 @@ class EloRatingSystem:
         ) / 200 - (self.runs.get(game, 0) + self.runs.get(other, 0))
 
     async def report(self, game: GameMeta, report: Report) -> int | None:
-        if game.email == report.author:
-            return None
-        return await self.reports.append(game.id, report)
+        return await self.reports.append(game.team_id, report)
 
     async def fetch_reports(self, game: str) -> tuple[Report, ...]:
         return await self.reports.get(game)

@@ -78,7 +78,7 @@ class Summarizer:
 
         try:
             completion = await self.client.chat.completions.create(
-                model="llama-3.2-90b-text-preview",
+                model="llama-3.3-70b-versatile",
                 messages=messages,
                 temperature=1,
                 max_tokens=1024,
@@ -88,7 +88,7 @@ class Summarizer:
             )
         except RateLimitError:
             completion = await self.client.chat.completions.create(
-                model="llama-3.2-11b-text-preview",
+                model="llama-3.2-3b-preview",
                 messages=messages,
                 temperature=1,
                 max_tokens=1024,

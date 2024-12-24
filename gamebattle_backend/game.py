@@ -6,8 +6,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import AsyncIterator
 
-from starlette.background import P
-
 from .common import GameMeta
 from .container import Container
 

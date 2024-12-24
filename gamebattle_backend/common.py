@@ -2,6 +2,7 @@
 
 from enum import Enum
 
+import yaml
 from pydantic.dataclasses import dataclass
 
 
@@ -23,37 +24,62 @@ class Status:
     status: RequestStatus
 
 
+@dataclass
+class Team:
+    id: str
+    name: str
+    member_emails: list[str]
+
+
+class TeamManager:
+    """Manage teams."""
+
+    def __init__(self):
+        self.teams = {}
+
+    def from_yaml(self, file: str):
+        """Load teams from a yaml file."""
+        with open(file, "r") as f:
+            data = yaml.safe_load(f)
+            for team_id, team_data in data.items():
+                self.teams[team_id] = Team(
+                    id=team_id,
+                    name=team_data["name"],
+                    member_emails=team_data["members"],
+                )
+
+    def team_of(self, email: str) -> Team | None:
+        """Get the team of an email."""
+        for team in self.teams.values():
+            if email in team.member_emails:
+                return team
+        return None
+
+    def __getitem__(self, key: str) -> Team:
+        """Get a team by name."""
+        return self.teams[key]
+
+    def get(self, key: str) -> Team | None:
+        """Get a team by name."""
+        return self.teams.get(key)
+
+
 @dataclass(frozen=True)
 class GameMeta:
     """The metadata of a game."""
 
     name: str
-    author: str
+    team_id: str
     file: str
-    email: str
 
     @property
     def image_name(self) -> str:
         """The name of the image."""
-        formatted_name = self.folder_name.lower().replace(" ", "-")
-        return f"gamebattle-{formatted_name}"
+        return f"gamebattle-{self.team_id}"
 
-    @classmethod
-    def folder_name_for(cls, email: str) -> str:
-        """The name of the game's folder"""
-        return email.split("@")[0]
-
-    @property
-    def folder_name(self) -> str:
-        """The name of the game's folder"""
-        return self.folder_name_for(self.email)
-
-    @property
-    def id(self) -> str:
-        """The id of the game."""
-        return self.folder_name
-
-    @classmethod
-    def id_for(cls, email: str) -> str:
-        """The id of the game."""
-        return cls.folder_name_for(email)
+    def allowed_access(self, email: str, team_manager: TeamManager) -> bool:
+        """Check if the email is allowed to access the game."""
+        team = team_manager.get(self.team_id)
+        if team is None:
+            return False
+        return email in team.member_emails
