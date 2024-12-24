@@ -11,3 +11,4 @@ trio==0.22.2
 httpx==0.25.0
 redis==5.0.1
 groq==0.11.0
+email-normalize==2.0.0

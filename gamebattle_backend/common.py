@@ -3,6 +3,7 @@
 from enum import Enum
 
 import yaml
+from email_normalize import Normalizer, normalize
 from pydantic.dataclasses import dataclass
 
 
@@ -36,8 +37,9 @@ class TeamManager:
 
     def __init__(self):
         self.teams = {}
+        self.normalizer = Normalizer()
 
-    def from_yaml(self, file: str):
+    async def from_yaml(self, file: str):
         """Load teams from a yaml file."""
         with open(file, "r") as f:
             data = yaml.safe_load(f)
@@ -45,11 +47,16 @@ class TeamManager:
                 self.teams[team_id] = Team(
                     id=team_id,
                     name=team_data["name"],
-                    member_emails=team_data["members"],
+                    member_emails=[
+                        (await self.normalizer.normalize(email)).normalized_address
+                        for email in team_data["members"]
+                    ],
                 )
+                print(f"Loaded team {team_id}: {self.teams[team_id]}", flush=True)
 
-    def team_of(self, email: str) -> Team | None:
+    async def team_of(self, email: str) -> Team | None:
         """Get the team of an email."""
+        email = (await self.normalizer.normalize(email)).normalized_address
         for team in self.teams.values():
             if email in team.member_emails:
                 return team

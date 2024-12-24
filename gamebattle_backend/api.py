@@ -152,8 +152,8 @@ class GamebattleApi:
         """
         self.preference_store = preference_store
         self.rating_system = rating_system
+        self.teams_path = teams_path
         self.teams = TeamManager()
-        self.teams.from_yaml(teams_path)
         self.launcher = Launcher(
             games_path,
             self.teams,
@@ -954,6 +954,7 @@ class GamebattleApi:
 
     async def setup(self):
         """Setup the API server."""
+        await self.teams.from_yaml(self.teams_path)
         await self.launcher.start()
         if not self.enable_competition:
             await self.launcher.start_generating_summaries()
