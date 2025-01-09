@@ -3,7 +3,7 @@
 from enum import Enum
 
 import yaml
-from email_normalize import Normalizer, normalize
+from email_normalize import Normalizer
 from pydantic.dataclasses import dataclass
 
 

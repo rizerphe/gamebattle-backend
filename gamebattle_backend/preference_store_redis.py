@@ -1,9 +1,11 @@
 """Redis preference store implementation."""
+
 import json
-from typing import AsyncIterable
 import uuid
+from typing import AsyncIterable
 
 import redis.asyncio as redis
+from email_normalize import Normalizer
 
 from gamebattle_backend.preferences import Preference, RatingSystem
 
@@ -19,6 +21,7 @@ class RedisPreferenceStore:
         """
         self.client = client
         self.rating_systems: list[RatingSystem] = []
+        self.normalizer = Normalizer()
 
     async def get(self, key: uuid.UUID) -> Preference | None:
         """Get a preference.
@@ -93,7 +96,13 @@ class RedisPreferenceStore:
         """
         n_preferences: float = 0
         async for preference in self.get_all_preferences():
-            if preference.author == preference_author_email:
+            normalized_author = (
+                await self.normalizer.normalize(preference.author)
+            ).normalized_address
+            normalized_target = (
+                await self.normalizer.normalize(preference_author_email)
+            ).normalized_address
+            if normalized_author == normalized_target:
                 n_preferences += preference.accummulation
         return n_preferences
 
