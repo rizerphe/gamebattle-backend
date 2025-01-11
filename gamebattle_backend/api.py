@@ -686,6 +686,7 @@ class GamebattleApi:
         if owner not in self.admin_emails:
             raise fastapi.HTTPException(status_code=400, detail="Cannot get all stats.")
         fieldnames = [
+            "Email",
             "Team ID",
             "Game name",
             "Elo",
@@ -697,9 +698,10 @@ class GamebattleApi:
         output = StringIO()
         writer = csv.DictWriter(output, fieldnames=fieldnames)
         writer.writeheader()
-        for game_meta, stats in await self.admin_allstats(owner):
+        for email, game_meta, stats in await self.admin_allstats(owner):
             writer.writerow(
                 {
+                    "Email": email,
                     "Team ID": game_meta.team_id,
                     "Game name": game_meta.name,
                     "Elo": stats.elo,
