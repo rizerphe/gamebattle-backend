@@ -136,7 +136,7 @@ class GamebattleApi:
     def __init__(
         self,
         games_path: str,
-        teams_path: str,
+        teams_path: str | None,
         preference_store: PreferenceStore,
         rating_system: EloRatingSystem,
         enable_competition: bool = True,
@@ -977,7 +977,7 @@ def launch_app() -> fastapi.FastAPI:
     )
     return GamebattleApi(
         os.environ["GAMES_PATH"],
-        os.environ["TEAMS_PATH"],
+        os.environ.get("TEAMS_PATH"),
         RedisPreferenceStore(r),
         EloRatingSystem(RedisReportStore(r)),
         os.environ.get("ENABLE_COMPETITION") == "true",

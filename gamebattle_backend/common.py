@@ -36,11 +36,15 @@ class TeamManager:
     """Manage teams."""
 
     def __init__(self):
-        self.teams = {}
+        self.teams: dict[str, Team] | None = None
         self.normalizer = Normalizer()
 
-    async def from_yaml(self, file: str):
+    async def from_yaml(self, file: str | None):
         """Load teams from a yaml file."""
+        if file is None:
+            self.teams = None
+            return
+        self.teams = {}
         with open(file, "r") as f:
             data = yaml.safe_load(f)
             for team_id, team_data in data.items():
@@ -57,6 +61,12 @@ class TeamManager:
     async def team_of(self, email: str) -> Team | None:
         """Get the team of an email."""
         email = (await self.normalizer.normalize(email)).normalized_address
+        if self.teams is None:
+            return Team(
+                id=email,
+                name=email,
+                member_emails=[email],
+            )
         for team in self.teams.values():
             if email in team.member_emails:
                 return team
@@ -64,10 +74,22 @@ class TeamManager:
 
     def __getitem__(self, key: str) -> Team:
         """Get a team by name."""
+        if self.teams is None:
+            return Team(
+                id=key,
+                name=key,
+                member_emails=[key],
+            )
         return self.teams[key]
 
     def get(self, key: str) -> Team | None:
         """Get a team by name."""
+        if self.teams is None:
+            return Team(
+                id=key,
+                name=key,
+                member_emails=[key],
+            )
         return self.teams.get(key)
 
 
