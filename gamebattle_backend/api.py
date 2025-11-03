@@ -370,7 +370,7 @@ class GamebattleApi:
         await websocket.send_json({"type": "bye"})
         await websocket.close()
 
-    def add_game_file(
+    async def add_game_file(
         self,
         content: bytes = fastapi.Body(...),
         filename: str = fastapi.Body(...),
@@ -395,7 +395,7 @@ class GamebattleApi:
             )
 
         if team_id is None:
-            team = self.teams.team_of(owner)
+            team = await self.teams.team_of(owner)
             if team is None:
                 raise fastapi.HTTPException(
                     status_code=400, detail="You are not in a team."
@@ -411,7 +411,7 @@ class GamebattleApi:
         except GamebattleError as e:
             raise fastapi.HTTPException(status_code=400, detail=e.message)
 
-    def remove_game_file(
+    async def remove_game_file(
         self,
         filename: str,
         owner: str = fastapi.Depends(firebase_email),
@@ -426,7 +426,7 @@ class GamebattleApi:
             raise fastapi.HTTPException(
                 status_code=400, detail="Competition mode is disabled."
             )
-        team = self.teams.team_of(owner)
+        team = await self.teams.team_of(owner)
         if team is None:
             raise fastapi.HTTPException(
                 status_code=400, detail="You are not in a team."
@@ -458,7 +458,7 @@ class GamebattleApi:
         except GamebattleError as e:
             raise fastapi.HTTPException(status_code=400, detail=e.message)
 
-    def get_game_files(
+    async def get_game_files(
         self,
         owner: str = fastapi.Depends(firebase_email),
     ) -> list[File]:
@@ -471,7 +471,7 @@ class GamebattleApi:
             raise fastapi.HTTPException(
                 status_code=400, detail="Competition mode is disabled."
             )
-        team = self.teams.team_of(owner)
+        team = await self.teams.team_of(owner)
         if team is None:
             raise fastapi.HTTPException(
                 status_code=400, detail="You are not in a team."
@@ -501,7 +501,7 @@ class GamebattleApi:
             for path, content in self.launcher.get_game_files(team_id).items()
         ]
 
-    def get_game_metadata(
+    async def get_game_metadata(
         self,
         owner: str = fastapi.Depends(firebase_email),
     ) -> GameMeta | None:
@@ -514,7 +514,7 @@ class GamebattleApi:
             raise fastapi.HTTPException(
                 status_code=400, detail="Competition mode is disabled."
             )
-        team = self.teams.team_of(owner)
+        team = await self.teams.team_of(owner)
         if team is None:
             return None
         try:
@@ -566,7 +566,7 @@ class GamebattleApi:
                 status_code=400, detail="Competition mode is disabled."
             )
 
-        owner_team = self.teams.team_of(owner.email)
+        owner_team = await self.teams.team_of(owner.email)
         owner_team_id = owner_team.id if owner_team else ""
 
         metadata = GameMeta(
@@ -586,7 +586,7 @@ class GamebattleApi:
             owner: The user ID of the session owner.
         """
         top = await self.leaderboard()
-        team = self.teams.team_of(owner)
+        team = await self.teams.team_of(owner)
         if team is None:
             return Stats(
                 permitted=False,
@@ -725,7 +725,7 @@ class GamebattleApi:
         Args:
             owner: The user ID of the session owner.
         """
-        team = self.teams.team_of(owner)
+        team = await self.teams.team_of(owner)
         if team is None:
             return "Ask the admins to make sure you are in a team."
         return await self.launcher.get_game_summary(team.id)
