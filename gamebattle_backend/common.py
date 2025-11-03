@@ -106,9 +106,10 @@ class GameMeta:
         """The name of the image."""
         return f"gamebattle-{self.team_id}"
 
-    def allowed_access(self, email: str, team_manager: TeamManager) -> bool:
+    async def allowed_access(self, email: str, team_manager: TeamManager) -> bool:
         """Check if the email is allowed to access the game."""
         team = team_manager.get(self.team_id)
+        email = (await team_manager.normalizer.normalize(email)).normalized_address
         if team is None:
             return False
         return email in team.member_emails

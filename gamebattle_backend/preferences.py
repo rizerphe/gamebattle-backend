@@ -217,7 +217,7 @@ class EloRatingSystem:
         available = [
             game
             for game in launcher.games
-            if not launcher.allowed_access(game, owner) and game.team_id not in avoid
+            if not await launcher.allowed_access(game, owner) and game.team_id not in avoid
         ]
         for game in available:
             if owner in [

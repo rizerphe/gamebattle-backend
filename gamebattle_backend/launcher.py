@@ -43,7 +43,7 @@ async def launch_randomly(
     available = [
         game
         for game in launcher.games
-        if not launcher.allowed_access(game, owner) and game.team_id not in avoid
+        if not await launcher.allowed_access(game, owner) and game.team_id not in avoid
     ]
     return available and random.sample(available, capacity)
 
@@ -64,7 +64,7 @@ async def launch_own(
     if capacity > 1:
         raise GamebattleError("Can only own one game at a time")
     available = [
-        game for game in launcher.games if launcher.allowed_access(game, owner)
+        game for game in launcher.games if await launcher.allowed_access(game, owner)
     ]
     if not available:
         raise GamebattleError("No games available")
@@ -98,7 +98,7 @@ class Launcher:
 
         self.games: list[GameMeta] = []
 
-    def allowed_access(self, game: GameMeta, owner: str) -> bool:
+    async def allowed_access(self, game: GameMeta, owner: str) -> bool:
         """Check if the owner has access to the game.
 
         Args:
@@ -108,7 +108,7 @@ class Launcher:
         Returns:
             bool: Whether the owner has access to the game
         """
-        return game.allowed_access(owner, self._teams)
+        return await game.allowed_access(owner, self._teams)
 
     async def start(self) -> None:
         """Scan the games folder for games."""
