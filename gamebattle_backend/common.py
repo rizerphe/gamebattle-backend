@@ -1,5 +1,6 @@
 """Common types."""
 
+import re
 from enum import Enum
 
 import yaml
@@ -66,6 +67,8 @@ class TeamManager:
             if email in team.member_emails:
                 return team
         if self.autobuild:
+            if re.match(email, r"^[^@]+pn@ucu\.edu\.ua$") is None:
+                return None
             self.teams[email.split("@")[0]] = Team(
                 id=email.split("@")[0],
                 name=email,
