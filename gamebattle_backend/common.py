@@ -35,15 +35,13 @@ class Team:
 class TeamManager:
     """Manage teams."""
 
-    def __init__(self):
-        self.teams: dict[str, Team] | None = None
+    def __init__(self, autobuild=False):
+        self.teams: dict[str, Team] = {}
+        self.autobuild = autobuild
         self.normalizer = Normalizer()
 
-    async def from_yaml(self, file: str | None):
+    async def from_yaml(self, file: str):
         """Load teams from a yaml file."""
-        if file is None:
-            self.teams = None
-            return
         self.teams = {}
         with open(file, "r") as f:
             data = yaml.safe_load(f)
@@ -61,35 +59,24 @@ class TeamManager:
     async def team_of(self, email: str) -> Team | None:
         """Get the team of an email."""
         email = (await self.normalizer.normalize(email)).normalized_address
-        if self.teams is None:
-            return Team(
-                id=email,
-                name=email,
-                member_emails=[email],
-            )
         for team in self.teams.values():
             if email in team.member_emails:
                 return team
+        if self.autobuild:
+            self.teams[email.split("@")[0]] = Team(
+                id=email.split("@")[0],
+                name=email,
+                member_emails=[email],
+            )
+            return self.teams[email.split("@")[0]]
         return None
 
     def __getitem__(self, key: str) -> Team:
-        """Get a team by name."""
-        if self.teams is None:
-            return Team(
-                id=key,
-                name=key,
-                member_emails=[key],
-            )
+        """Get a team by id."""
         return self.teams[key]
 
     def get(self, key: str) -> Team | None:
-        """Get a team by name."""
-        if self.teams is None:
-            return Team(
-                id=key,
-                name=key,
-                member_emails=[key],
-            )
+        """Get a team by id."""
         return self.teams.get(key)
 
 
