@@ -40,9 +40,12 @@ class TeamManager:
         self.autobuild = autobuild
         self.normalizer = Normalizer()
 
+        self.path: str | None = None
+
     async def from_yaml(self, file: str):
         """Load teams from a yaml file."""
         self.teams = {}
+        self.path = file
         with open(file, "r") as f:
             data = yaml.safe_load(f)
             for team_id, team_data in data.items():
@@ -68,6 +71,17 @@ class TeamManager:
                 name=email,
                 member_emails=[email],
             )
+            if self.path:
+                yaml.safe_dump(
+                    {
+                        team.id: {
+                            "name": team.name,
+                            "members": team.member_emails,
+                        }
+                        for team in self.teams.values()
+                    },
+                    open(self.path, "w"),
+                )
             return self.teams[email.split("@")[0]]
         return None
 
