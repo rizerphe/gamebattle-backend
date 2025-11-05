@@ -728,7 +728,7 @@ class GamebattleApi:
         """
         team = await self.teams.team_of(owner)
         if team is None:
-            return "Ask the admins to make sure you are in a team."
+            return "Ask the admins to make sure you are in a team. Are you using the right email?"
         return await self.launcher.get_game_summary(team.id)
 
     async def set_preference(
