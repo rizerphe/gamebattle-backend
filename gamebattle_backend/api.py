@@ -64,6 +64,7 @@ class Stats:
     required_accumulation: float
     reports: int
     times_played: int
+    game_name: str | None
 
 
 def firebase_email(
@@ -600,9 +601,14 @@ class GamebattleApi:
                 required_accumulation=5,
                 reports=0,
                 times_played=0,
+                game_name=None,
             )
         score, n_played = await self.rating_system.score_and_played(team.id)
         reports = await self.rating_system.fetch_reports(team.id)
+        try:
+            game_name = self.launcher[team.id].name
+        except KeyError:
+            game_name = None
         return Stats(
             permitted=True,
             started=self.enable_competition,
@@ -619,6 +625,7 @@ class GamebattleApi:
             required_accumulation=5,
             reports=len(reports),
             times_played=n_played,
+            game_name=game_name,
         )
 
     async def admin_stats(
@@ -633,6 +640,10 @@ class GamebattleApi:
         top = await self.leaderboard()
         score, n_played = await self.rating_system.score_and_played_if_exists(team_id)
         reports = await self.rating_system.fetch_reports(team_id)
+        try:
+            game_name = self.launcher[team_id].name
+        except KeyError:
+            game_name = None
         return [
             (
                 player,
@@ -660,6 +671,7 @@ class GamebattleApi:
                     required_accumulation=5,
                     reports=len(reports),
                     times_played=n_played,
+                    game_name=game_name,
                 ),
             )
             for player in self.teams[team_id].member_emails
