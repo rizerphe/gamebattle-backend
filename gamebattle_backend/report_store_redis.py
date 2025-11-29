@@ -67,3 +67,39 @@ class RedisReportStore:
             key (str): The game name
         """
         await self.client.delete(f"report:{key}")
+
+    async def exclude(self, team_id: str) -> None:
+        """Exclude a game from competition.
+
+        Args:
+            team_id (str): The team ID of the game to exclude
+        """
+        await self.client.sadd("excluded_games", team_id)
+
+    async def include(self, team_id: str) -> None:
+        """Re-include a game in competition.
+
+        Args:
+            team_id (str): The team ID of the game to include
+        """
+        await self.client.srem("excluded_games", team_id)
+
+    async def is_excluded(self, team_id: str) -> bool:
+        """Check if a game is excluded from competition.
+
+        Args:
+            team_id (str): The team ID of the game to check
+
+        Returns:
+            bool: True if the game is excluded
+        """
+        return await self.client.sismember("excluded_games", team_id)
+
+    async def excluded_games(self) -> set[str]:
+        """Get all excluded game team IDs.
+
+        Returns:
+            set[str]: Set of excluded team IDs
+        """
+        members = await self.client.smembers("excluded_games")
+        return {m.decode() if isinstance(m, bytes) else m for m in members}

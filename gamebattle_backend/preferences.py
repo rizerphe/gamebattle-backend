@@ -118,6 +118,37 @@ class ReportStore(Protocol):
             key (str): The game name
         """
 
+    async def exclude(self, team_id: str, /) -> None:
+        """Exclude a game from competition.
+
+        Args:
+            team_id (str): The team ID of the game to exclude
+        """
+
+    async def include(self, team_id: str, /) -> None:
+        """Re-include a game in competition.
+
+        Args:
+            team_id (str): The team ID of the game to include
+        """
+
+    async def is_excluded(self, team_id: str, /) -> bool:
+        """Check if a game is excluded from competition.
+
+        Args:
+            team_id (str): The team ID of the game to check
+
+        Returns:
+            bool: True if the game is excluded
+        """
+
+    async def excluded_games(self) -> set[str]:
+        """Get all excluded game team IDs.
+
+        Returns:
+            set[str]: Set of excluded team IDs
+        """
+
 
 class RatingSystem(Protocol):
     """A rating system for games"""
@@ -184,11 +215,12 @@ class EloRatingSystem:
         return 1 / (1 + 10 ** ((self.ratings[other] - self.ratings[game]) / 400))
 
     async def top(self, launcher: Launcher) -> AsyncIterator[Rating]:
+        excluded = await self.reports.excluded_games()
         for item in sorted(
             (
                 Rating(launcher[game].name, score)
                 for game, score in self.ratings.items()
-                if game in launcher
+                if game in launcher and game not in excluded
             ),
             key=operator.attrgetter("score"),
             reverse=True,
@@ -214,10 +246,13 @@ class EloRatingSystem:
         owner: str,
         avoid: frozenset[str] = frozenset(),
     ) -> list[GameMeta]:
+        excluded = await self.reports.excluded_games()
         available = [
             game
             for game in launcher.games
-            if not await launcher.allowed_access(game, owner) and game.team_id not in avoid
+            if not await launcher.allowed_access(game, owner)
+            and game.team_id not in avoid
+            and game.team_id not in excluded
         ]
         for game in available:
             if owner in [

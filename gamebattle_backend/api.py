@@ -906,6 +906,49 @@ class GamebattleApi:
             raise fastapi.HTTPException(status_code=403, detail="You are not an admin.")
         return await self.rating_system.fetch_reports(game_id)
 
+    async def exclude_game(
+        self,
+        team_id: str,
+        owner: str = fastapi.Depends(firebase_email),
+    ) -> None:
+        """Exclude a game from competition.
+
+        Args:
+            team_id: The team ID of the game to exclude.
+            owner: The user ID of the session owner.
+        """
+        if owner not in self.admin_emails:
+            raise fastapi.HTTPException(status_code=403, detail="You are not an admin.")
+        await self.rating_system.reports.exclude(team_id)
+
+    async def include_game(
+        self,
+        team_id: str,
+        owner: str = fastapi.Depends(firebase_email),
+    ) -> None:
+        """Re-include a game in competition.
+
+        Args:
+            team_id: The team ID of the game to include.
+            owner: The user ID of the session owner.
+        """
+        if owner not in self.admin_emails:
+            raise fastapi.HTTPException(status_code=403, detail="You are not an admin.")
+        await self.rating_system.reports.include(team_id)
+
+    async def excluded_games(
+        self,
+        owner: str = fastapi.Depends(firebase_email),
+    ) -> set[str]:
+        """List all excluded games.
+
+        Args:
+            owner: The user ID of the session owner.
+        """
+        if owner not in self.admin_emails:
+            raise fastapi.HTTPException(status_code=403, detail="You are not an admin.")
+        return await self.rating_system.reports.excluded_games()
+
     async def leaderboard(
         self,
     ) -> list[Rating]:
@@ -937,6 +980,9 @@ class GamebattleApi:
         api.post("/sessions/{session_id}/{game_id}/restart")(self.restart_game)
         api.post("/sessions/{session_id}/{game_id}/report")(self.report_game)
         api.get("/reports/{game_id}")(self.fetch_reports)
+        api.post("/admin/games/{team_id}/exclude")(self.exclude_game)
+        api.delete("/admin/games/{team_id}/exclude")(self.include_game)
+        api.get("/admin/games/excluded")(self.excluded_games)
         api.get("/sessions/{session_id}/preference")(self.get_preference)
         api.post("/sessions/{session_id}/preference")(self.set_preference)
         api.get("/leaderboard")(self.leaderboard)
