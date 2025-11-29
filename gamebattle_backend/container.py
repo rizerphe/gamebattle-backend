@@ -73,14 +73,23 @@ class ReplayableStream(Generic[T]):  # With append(), close() and __aiter__
 class Container:
     """A docker container."""
 
-    def __init__(self, image_name: str):
+    def __init__(
+        self,
+        image_name: str,
+        memory_limit: int | None = None,
+        cpu_limit: float | None = None,
+    ):
         """Create a new container.
 
         Args:
             image_name (str): The name of the image to use.
+            memory_limit (int | None): Memory limit in bytes.
+            cpu_limit (float | None): CPU limit as fraction of cores (e.g., 0.25 = 25%).
         """
         self._output: ReplayableStream[Output] = ReplayableStream()
         self._image_name = image_name
+        self._memory_limit = memory_limit
+        self._cpu_limit = cpu_limit
 
         self._container: aiodocker.docker.DockerContainer | None = None
         self._stream: aiodocker.stream.Stream | None = None
@@ -89,6 +98,12 @@ class Container:
 
     async def start(self):
         """Start the container."""
+        host_config: dict = {}
+        if self._memory_limit is not None:
+            host_config["Memory"] = self._memory_limit
+        if self._cpu_limit is not None:
+            host_config["NanoCpus"] = int(self._cpu_limit * 1e9)
+
         self._container = await docker.containers.create(
             config={
                 "Image": self._image_name,
@@ -97,6 +112,7 @@ class Container:
                 "AttachStdin": True,
                 "OpenStdin": True,
                 "Tty": True,
+                **({"HostConfig": host_config} if host_config else {}),
             },
         )
         self._stream = self._container.attach(

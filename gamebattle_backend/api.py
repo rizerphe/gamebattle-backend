@@ -31,7 +31,7 @@ from .auth import User, verify, verify_user
 from .common import GameMeta, TeamManager
 from .game import Game
 from .launcher import GamebattleError, Launcher, launch_own, launch_specified
-from .manager import Manager, TooManySessionsError
+from .manager import Manager, TooManyContainersError, TooManySessionsError
 from .session import SessionPublic
 
 
@@ -215,6 +215,10 @@ class GamebattleApi:
             raise fastapi.HTTPException(
                 status_code=400, detail="Too many sessions for user."
             )
+        except TooManyContainersError:
+            raise fastapi.HTTPException(
+                status_code=503, detail="Server is at capacity. Try again later."
+            )
 
     async def create_own_session(
         self,
@@ -252,6 +256,10 @@ class GamebattleApi:
             raise fastapi.HTTPException(
                 status_code=400, detail="Too many sessions for user."
             )
+        except TooManyContainersError:
+            raise fastapi.HTTPException(
+                status_code=503, detail="Server is at capacity. Try again later."
+            )
         except GamebattleError as e:
             raise fastapi.HTTPException(status_code=400, detail=e.message)
 
@@ -285,7 +293,10 @@ class GamebattleApi:
             owner: The user ID of the session owner.
         """
         try:
-            await self.manager.get_game(owner, session_id, game_id).restart()
+            await self.manager.get_game(owner, session_id, game_id).restart(
+                self.manager.config.container_memory_limit,
+                self.manager.config.container_cpu_limit,
+            )
         except KeyError:
             raise fastapi.HTTPException(
                 status_code=404, detail="Session or game not found."
@@ -883,6 +894,8 @@ class GamebattleApi:
                         owner,
                         self.launcher,
                         self.rating_system.launch,
+                        self.manager.config.container_memory_limit,
+                        self.manager.config.container_cpu_limit,
                     )
                 )
             game = self.manager.get_game(owner, session_id, game_id)

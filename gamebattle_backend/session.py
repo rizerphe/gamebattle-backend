@@ -55,6 +55,8 @@ class Session:
         launcher: LauncherType_contra,
         strategy: LaunchStrategy[LauncherType_contra],
         capacity: int = 2,
+        memory_limit: int | None = None,
+        cpu_limit: float | None = None,
     ) -> Session:
         """Launch a session.
 
@@ -63,9 +65,12 @@ class Session:
             launcher (LauncherType_contra): The launcher to use
             strategy (LaunchStrategy): The strategy to use to pick games.
             capacity (int): The number of games to launch. Defaults to 2.
+            memory_limit (int | None): Memory limit per container in bytes.
+            cpu_limit (float | None): CPU limit per container as fraction of cores.
         """
         games = [
-            await Game.start(game) for game in await strategy(launcher, capacity, owner)
+            await Game.start(game, memory_limit, cpu_limit)
+            for game in await strategy(launcher, capacity, owner)
         ]
         random.shuffle(games)
         return Session(
@@ -98,6 +103,8 @@ class Session:
         owner: str,
         launcher: LauncherType_contra,
         strategy: LaunchStrategy[LauncherType_contra],
+        memory_limit: int | None = None,
+        cpu_limit: float | None = None,
     ) -> None:
         """Replace a game in the session.
 
@@ -106,6 +113,8 @@ class Session:
             owner (str): The owner of the session
             launcher (LauncherType_contra): The launcher to use
             strategy (LaunchStrategy): The strategy to use to pick a game.
+            memory_limit (int | None): Memory limit per container in bytes.
+            cpu_limit (float | None): CPU limit per container as fraction of cores.
         """
         await self.games[game_id].stop()
         self.games[game_id] = await Game.start(
@@ -116,5 +125,7 @@ class Session:
                     owner,
                     avoid=frozenset(game.metadata.team_id for game in self.games),
                 )
-            )[0]
+            )[0],
+            memory_limit,
+            cpu_limit,
         )

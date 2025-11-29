@@ -26,15 +26,24 @@ class Game:
     container: Container
 
     @classmethod
-    async def start(cls, meta: GameMeta) -> Game:
+    async def start(
+        cls,
+        meta: GameMeta,
+        memory_limit: int | None = None,
+        cpu_limit: float | None = None,
+    ) -> Game:
         """Start a new game with the given metadata."""
-        container = Container(meta.image_name)
+        container = Container(meta.image_name, memory_limit, cpu_limit)
         await container.start()
         return cls(meta, container)
 
-    async def restart(self) -> None:
+    async def restart(
+        self,
+        memory_limit: int | None = None,
+        cpu_limit: float | None = None,
+    ) -> None:
         await self.container.stop()
-        self.container = Container(self.metadata.image_name)
+        self.container = Container(self.metadata.image_name, memory_limit, cpu_limit)
         await self.container.start()
 
     async def stop(self) -> None:

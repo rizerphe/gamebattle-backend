@@ -21,6 +21,9 @@ class Config:
     """A configuration for the session manager."""
 
     max_sessions_per_user: int = 1
+    max_containers: int | None = None
+    container_memory_limit: int = 512 * 1024 * 1024  # 512MB
+    container_cpu_limit: float = 0.25  # 25% of a core
 
     @classmethod
     def default(cls) -> Config:
@@ -34,6 +37,10 @@ class SessionManagerError(Exception):
 
 class TooManySessionsError(SessionManagerError):
     """Too many sessions for a user."""
+
+
+class TooManyContainersError(SessionManagerError):
+    """Too many containers running globally."""
 
 
 class Manager:
@@ -53,6 +60,7 @@ class Manager:
         self.sessions: dict[uuid.UUID, Session] = {}
         self.launcher = launcher
         self.config = config or Config.default()
+        self._container_count = 0
 
     def get_session(self, user_id: str, session_id: uuid.UUID) -> Session:
         """Return a session.
@@ -108,12 +116,24 @@ class Manager:
             capacity: The number of games to launch.
         Raises:
             TooManySessionsError: If the user already has too many sessions.
+            TooManyContainersError: If the global container limit would be exceeded.
         """
         if len(self.user_sessions(owner)) >= self.config.max_sessions_per_user:
             raise TooManySessionsError
+        if (
+            self.config.max_containers is not None
+            and self._container_count + capacity > self.config.max_containers
+        ):
+            raise TooManyContainersError
         session = await Session.launch(
-            owner, self.launcher, launch_strategy, capacity=capacity
+            owner,
+            self.launcher,
+            launch_strategy,
+            capacity=capacity,
+            memory_limit=self.config.container_memory_limit,
+            cpu_limit=self.config.container_cpu_limit,
         )
+        self._container_count += capacity
         id_ = uuid.uuid4()
         self.sessions[id_] = session
 
@@ -150,5 +170,6 @@ class Manager:
         session = self.sessions[session_id]
         if owner is not None and session.owner != owner:
             raise KeyError
+        self._container_count -= len(session.games)
         await session.stop()
         del self.sessions[session_id]
