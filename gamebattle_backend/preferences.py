@@ -89,6 +89,13 @@ class PreferenceStore(Protocol):
             rating_system (RatingSystem): The rating system to bind
         """
 
+    async def sorted_preferences(self) -> list[Preference]:
+        """Get all preferences sorted by timestamp.
+
+        Returns:
+            list[Preference]: List of preferences sorted by timestamp
+        """
+
 
 class ReportStore(Protocol):
     """A store for reports"""
@@ -283,6 +290,63 @@ class EloRatingSystem:
     async def fetch_reports(self, game: str) -> tuple[Report, ...]:
         return await self.reports.get(game)
 
+    def replay_with_history(
+        self, preferences: list[Preference]
+    ) -> list[tuple[Preference, dict[str, tuple[float, float]]]]:
+        """Replay preferences and return ELO changes for each.
+
+        Args:
+            preferences: List of preferences in chronological order.
+
+        Returns:
+            List of (preference, elo_changes) tuples where elo_changes maps
+            team_id to (before, after) ELO values.
+        """
+        ratings: dict[str, float] = {}
+        result: list[tuple[Preference, dict[str, tuple[float, float]]]] = []
+
+        for preference in preferences:
+            # Initialize ratings for new games
+            for game in preference.games:
+                if game not in ratings:
+                    ratings[game] = self.initial
+
+            # Capture before values
+            before_values = {game: ratings[game] for game in preference.games}
+
+            # Calculate expected scores
+            expected_first = 1 / (
+                1
+                + 10
+                ** (
+                    (ratings[preference.games[1]] - ratings[preference.games[0]]) / 400
+                )
+            )
+            expected_second = 1 - expected_first
+
+            # Update ratings
+            ratings[preference.games[0]] += self.k * (
+                preference.first_score - expected_first
+            )
+            ratings[preference.games[1]] += self.k * (
+                (1 - preference.first_score) - expected_second
+            )
+
+            # Normalize if any rating went negative
+            min_score = min(ratings.values())
+            if min_score < 0:
+                for game in ratings:
+                    ratings[game] -= min_score
+
+            # Capture after values
+            elo_changes = {
+                game: (before_values[game], ratings[game])
+                for game in preference.games
+            }
+            result.append((preference, elo_changes))
+
+        return result
+
 
 class RAMPreferenceStore:
     def __init__(self) -> None:
@@ -313,6 +377,9 @@ class RAMPreferenceStore:
         async for preference in self:
             await rating_system.register(preference)
         self.rating_systems.append(rating_system)
+
+    async def sorted_preferences(self) -> list[Preference]:
+        return sorted(self.preferences.values(), key=lambda x: x.timestamp)
 
     async def rebuild(self) -> None:
         for rating_system in self.rating_systems:

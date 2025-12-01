@@ -67,6 +67,26 @@ class Stats:
     game_name: str | None
 
 
+@dataclass
+class EloChange:
+    """ELO change for a game."""
+
+    team_id: str
+    before: float
+    after: float
+
+
+@dataclass
+class PreferenceHistoryEntry:
+    """A preference history entry with ELO changes."""
+
+    games: tuple[str, str]
+    first_score: float
+    author: str
+    timestamp: float
+    elo_changes: list[EloChange]
+
+
 def firebase_email(
     res: fastapi.Response,
     credential: HTTPAuthorizationCredentials = fastapi.Depends(
@@ -974,6 +994,33 @@ class GamebattleApi:
             raise fastapi.HTTPException(status_code=403, detail="You are not an admin.")
         return await self.rating_system.reports.excluded_games()
 
+    async def admin_preference_history(
+        self,
+        owner: str = fastapi.Depends(firebase_email),
+    ) -> list[PreferenceHistoryEntry]:
+        """Get the full preference history with ELO changes.
+
+        Args:
+            owner: The user ID of the session owner.
+        """
+        if owner not in self.admin_emails:
+            raise fastapi.HTTPException(status_code=403, detail="You are not an admin.")
+        preferences = await self.preference_store.sorted_preferences()
+        history = self.rating_system.replay_with_history(preferences)
+        return [
+            PreferenceHistoryEntry(
+                games=preference.games,
+                first_score=preference.first_score,
+                author=preference.author,
+                timestamp=preference.timestamp,
+                elo_changes=[
+                    EloChange(team_id=team_id, before=before, after=after)
+                    for team_id, (before, after) in elo_changes.items()
+                ],
+            )
+            for preference, elo_changes in history
+        ]
+
     async def leaderboard(
         self,
     ) -> list[Rating]:
@@ -1008,6 +1055,7 @@ class GamebattleApi:
         api.post("/admin/games/{team_id}/exclude")(self.exclude_game)
         api.delete("/admin/games/{team_id}/exclude")(self.include_game)
         api.get("/admin/games/excluded")(self.excluded_games)
+        api.get("/admin/preferences/history")(self.admin_preference_history)
         api.get("/sessions/{session_id}/preference")(self.get_preference)
         api.post("/sessions/{session_id}/preference")(self.set_preference)
         api.get("/leaderboard")(self.leaderboard)
