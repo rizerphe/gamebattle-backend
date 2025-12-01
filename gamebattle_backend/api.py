@@ -84,6 +84,7 @@ class PreferenceHistoryEntry:
     game_names: tuple[str, str]
     first_score: float
     author: str
+    author_team: str | None
     timestamp: float
     elo_changes: list[EloChange]
 
@@ -1067,6 +1068,15 @@ class GamebattleApi:
             raise fastapi.HTTPException(status_code=403, detail="You are not an admin.")
         preferences = await self.preference_store.sorted_preferences()
         history = self.rating_system.replay_with_history(preferences)
+        # Look up unique author teams in parallel
+        unique_authors = list({preference.author for preference, _ in history})
+        teams = await asyncio.gather(
+            *[self.teams.team_of(author) for author in unique_authors]
+        )
+        author_team_map = {
+            author: team.name if team else None
+            for author, team in zip(unique_authors, teams)
+        }
         return [
             PreferenceHistoryEntry(
                 games=preference.games,
@@ -1080,6 +1090,7 @@ class GamebattleApi:
                 ),
                 first_score=preference.first_score,
                 author=preference.author,
+                author_team=author_team_map[preference.author],
                 timestamp=preference.timestamp,
                 elo_changes=[
                     EloChange(team_id=team_id, before=before, after=after)
