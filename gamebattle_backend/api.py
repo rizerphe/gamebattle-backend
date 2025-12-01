@@ -81,6 +81,7 @@ class PreferenceHistoryEntry:
     """A preference history entry with ELO changes."""
 
     games: tuple[str, str]
+    game_names: tuple[str, str]
     first_score: float
     author: str
     timestamp: float
@@ -1069,6 +1070,14 @@ class GamebattleApi:
         return [
             PreferenceHistoryEntry(
                 games=preference.games,
+                game_names=(
+                    self.launcher[preference.games[0]].name
+                    if preference.games[0] in self.launcher
+                    else preference.games[0],
+                    self.launcher[preference.games[1]].name
+                    if preference.games[1] in self.launcher
+                    else preference.games[1],
+                ),
                 first_score=preference.first_score,
                 author=preference.author,
                 timestamp=preference.timestamp,
