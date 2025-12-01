@@ -50,12 +50,15 @@ class RedisPreferenceStore:
         except json.JSONDecodeError:
             return None
 
-    async def set(self, key: uuid.UUID, value: Preference) -> None:
+    async def set(
+        self, key: uuid.UUID, value: Preference, owns_game: bool = False
+    ) -> None:
         """Set a preference.
 
         Args:
             key (str): The session id
             value (Preference): The preference
+            owns_game (bool): Whether the author owns one of the games
         """
         preference_exists = await self.client.exists(f"preference:{key}")
         await self.client.hmset(
@@ -73,7 +76,7 @@ class RedisPreferenceStore:
                 await self.build_system(preferences, rating_system)
         else:
             for rating_system in self.rating_systems:
-                await rating_system.register(value)
+                await rating_system.register(value, owns_game=owns_game)
 
     async def delete(self, key: uuid.UUID) -> None:
         """Delete a preference.

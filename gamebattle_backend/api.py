@@ -87,6 +87,19 @@ class PreferenceHistoryEntry:
     author_team: str | None
     timestamp: float
     elo_changes: list[EloChange]
+    counted: bool  # Whether this preference affected ELO
+
+
+@dataclass
+class HypotheticalLeaderboardEntry:
+    """An entry in the hypothetical leaderboard."""
+
+    name: str
+    team_id: str
+    current_score: float | None
+    hypothetical_score: float | None
+    delta: float  # hypothetical - current (0 if either is None)
+    owned_by_excluded: bool
 
 
 def firebase_email(
@@ -861,7 +874,16 @@ class GamebattleApi:
                 status_code=400, detail="The session is not over."
             )
         preference = await Preference.from_session(session, score_first)
-        await self.preference_store.set(session_id, preference)
+
+        # Check if user owns either game
+        owns_game = False
+        for game_id in preference.games:
+            if game_id in self.launcher:
+                if await self.launcher.allowed_access(self.launcher[game_id], player):
+                    owns_game = True
+                    break
+
+        await self.preference_store.set(session_id, preference, owns_game=owns_game)
 
     async def get_preference(
         self,
@@ -1067,16 +1089,24 @@ class GamebattleApi:
         if owner not in self.admin_emails:
             raise fastapi.HTTPException(status_code=403, detail="You are not an admin.")
         preferences = await self.preference_store.sorted_preferences()
-        history = self.rating_system.replay_with_history(preferences)
+
         # Look up unique author teams in parallel
-        unique_authors = list({preference.author for preference, _ in history})
+        unique_authors = list({preference.author for preference in preferences})
         teams = await asyncio.gather(
             *[self.teams.team_of(author) for author in unique_authors]
         )
-        author_team_map = {
+        # Map author to team name (for display)
+        author_team_name_map = {
             author: team.name if team else None
             for author, team in zip(unique_authors, teams)
         }
+        # Map author to team id (for ownership check)
+        author_team_id_map: dict[str, str | None] = {
+            author: team.id if team else None
+            for author, team in zip(unique_authors, teams)
+        }
+
+        history = self.rating_system.replay_with_history(preferences, author_team_id_map)
         return [
             PreferenceHistoryEntry(
                 games=preference.games,
@@ -1090,15 +1120,87 @@ class GamebattleApi:
                 ),
                 first_score=preference.first_score,
                 author=preference.author,
-                author_team=author_team_map[preference.author],
+                author_team=author_team_name_map[preference.author],
                 timestamp=preference.timestamp,
                 elo_changes=[
                     EloChange(team_id=team_id, before=before, after=after)
                     for team_id, (before, after) in elo_changes.items()
                 ],
+                counted=counted,
             )
-            for preference, elo_changes in history
+            for preference, elo_changes, counted in history
         ]
+
+    async def admin_hypothetical_leaderboard(
+        self,
+        excluded_emails: list[str] = fastapi.Body(...),
+        owner: str = fastapi.Depends(firebase_email),
+    ) -> list[HypotheticalLeaderboardEntry]:
+        """Get a hypothetical leaderboard excluding certain voters.
+
+        Args:
+            excluded_emails: List of emails whose votes should be excluded.
+            owner: The user ID of the session owner.
+        """
+        if owner not in self.admin_emails:
+            raise fastapi.HTTPException(status_code=403, detail="Not an admin.")
+
+        # Normalize excluded emails
+        normalized_excluded = frozenset(
+            await asyncio.gather(
+                *[self.preference_store.normalize_email(e) for e in excluded_emails]
+            )
+        )
+
+        # Get teams owned by excluded users
+        excluded_teams: set[str] = set()
+        teams_results = await asyncio.gather(
+            *[self.teams.team_of(email) for email in excluded_emails]
+        )
+        for team in teams_results:
+            if team:
+                excluded_teams.add(team.id)
+
+        # Replay without excluded authors
+        preferences = await self.preference_store.sorted_preferences()
+
+        # Build author to team_id mapping for ownership check
+        unique_authors = list({preference.author for preference in preferences})
+        author_teams_results = await asyncio.gather(
+            *[self.teams.team_of(author) for author in unique_authors]
+        )
+        author_team_id_map: dict[str, str | None] = {
+            author: team.id if team else None
+            for author, team in zip(unique_authors, author_teams_results)
+        }
+
+        hypothetical = self.rating_system.replay_excluding_authors(
+            preferences, normalized_excluded, author_team_id_map
+        )
+
+        # Build result
+        excluded_from_lb = await self.rating_system.reports.excluded_games()
+        results = []
+        for game in self.launcher.games:
+            if game.team_id in excluded_from_lb:
+                continue
+            current = self.rating_system.ratings.get(game.team_id)
+            hypo = hypothetical.get(game.team_id)
+            delta = (hypo or self.rating_system.initial) - (
+                current or self.rating_system.initial
+            )
+            results.append(
+                HypotheticalLeaderboardEntry(
+                    name=game.name,
+                    team_id=game.team_id,
+                    current_score=current,
+                    hypothetical_score=hypo,
+                    delta=delta,
+                    owned_by_excluded=game.team_id in excluded_teams,
+                )
+            )
+
+        return sorted(results, key=lambda x: x.hypothetical_score or 0, reverse=True)
 
     async def leaderboard(
         self,
@@ -1135,6 +1237,7 @@ class GamebattleApi:
         api.delete("/admin/games/{team_id}/exclude")(self.include_game)
         api.get("/admin/games/excluded")(self.excluded_games)
         api.get("/admin/preferences/history")(self.admin_preference_history)
+        api.post("/admin/leaderboard/hypothetical")(self.admin_hypothetical_leaderboard)
         api.get("/sessions/{session_id}/preference")(self.get_preference)
         api.post("/sessions/{session_id}/preference")(self.set_preference)
         api.get("/leaderboard")(self.leaderboard)

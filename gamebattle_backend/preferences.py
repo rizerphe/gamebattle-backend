@@ -58,12 +58,15 @@ class PreferenceStore(Protocol):
             key (str): The session id
         """
 
-    async def set(self, key: uuid.UUID, value: Preference) -> None:
+    async def set(
+        self, key: uuid.UUID, value: Preference, owns_game: bool = False
+    ) -> None:
         """Set a preference.
 
         Args:
             key (str): The session id
             value (Preference): The preference
+            owns_game (bool): Whether the author owns one of the games
         """
 
     async def delete(self, key: uuid.UUID) -> None:
@@ -177,11 +180,15 @@ class ReportStore(Protocol):
 class RatingSystem(Protocol):
     """A rating system for games"""
 
-    async def register(self, preference: Preference) -> None:
+    async def register(self, preference: Preference, owns_game: bool = False) -> bool:
         """Register a preference.
 
         Args:
             preference (Preference): The preference to register
+            owns_game (bool): Whether the author owns one of the games
+
+        Returns:
+            bool: True if the preference affected ratings
         """
         ...
 
@@ -209,12 +216,36 @@ class EloRatingSystem:
         self.ratings: dict[str, float] = {}
         self.runs: dict[str, int] = {}
         self.reports: ReportStore = reports
+        self.seen_games: dict[str, set[str]] = {}  # author -> set of team_ids
 
     async def clear(self) -> None:
         self.ratings.clear()
         self.runs.clear()
+        self.seen_games.clear()
 
-    async def register(self, preference: Preference) -> None:
+    def get_seen_games(self, owner: str) -> frozenset[str]:
+        """Get games the user has already seen."""
+        return frozenset(self.seen_games.get(owner, set()))
+
+    def _add_seen_games(self, owner: str, games: tuple[str, str]) -> None:
+        """Add games to user's seen set."""
+        if owner not in self.seen_games:
+            self.seen_games[owner] = set()
+        self.seen_games[owner].update(games)
+
+    async def register(self, preference: Preference, owns_game: bool = False) -> bool:
+        """Register a preference. Returns True if it affected ratings."""
+        # Check if user already rated either game (before adding to set)
+        author_rated = self.seen_games.get(preference.author, set())
+        already_rated = any(g in author_rated for g in preference.games)
+
+        # Always track which games user has rated
+        self._add_seen_games(preference.author, preference.games)
+
+        # Skip ELO update if invalid
+        if owns_game or already_rated:
+            return False
+
         for game in preference.games:
             if game not in self.ratings:
                 self.ratings[game] = self.initial
@@ -228,6 +259,8 @@ class EloRatingSystem:
         if min_score < 0:
             for game in self.ratings:
                 self.ratings[game] -= min_score
+
+        return True
 
     def expected(self, preference: Preference) -> tuple[float, float]:
         return (
@@ -271,12 +304,14 @@ class EloRatingSystem:
         avoid: frozenset[str] = frozenset(),
     ) -> list[GameMeta]:
         excluded = await self.reports.excluded_games()
+        seen = self.get_seen_games(owner)
         available = [
             game
             for game in launcher.games
             if not await launcher.allowed_access(game, owner)
             and game.team_id not in avoid
             and game.team_id not in excluded
+            and game.team_id not in seen
         ]
         for game in available:
             if owner in [
@@ -308,21 +343,47 @@ class EloRatingSystem:
         return await self.reports.get(game)
 
     def replay_with_history(
-        self, preferences: list[Preference]
-    ) -> list[tuple[Preference, dict[str, tuple[float, float]]]]:
+        self,
+        preferences: list[Preference],
+        author_teams: dict[str, str | None] | None = None,
+    ) -> list[tuple[Preference, dict[str, tuple[float, float]], bool]]:
         """Replay preferences and return ELO changes for each.
 
         Args:
             preferences: List of preferences in chronological order.
+            author_teams: Mapping of author email to their team_id (or None if no team).
+                If provided, preferences where author owns a game will be marked as not counted.
 
         Returns:
-            List of (preference, elo_changes) tuples where elo_changes maps
-            team_id to (before, after) ELO values.
+            List of (preference, elo_changes, counted) tuples where elo_changes maps
+            team_id to (before, after) ELO values, and counted indicates if it affected ELO.
         """
         ratings: dict[str, float] = {}
-        result: list[tuple[Preference, dict[str, tuple[float, float]]]] = []
+        seen: dict[str, set[str]] = {}
+        result: list[tuple[Preference, dict[str, tuple[float, float]], bool]] = []
 
         for preference in preferences:
+            # Check if author owns either game
+            owns_game = False
+            if author_teams is not None:
+                author_team = author_teams.get(preference.author)
+                if author_team is not None:
+                    owns_game = author_team in preference.games
+
+            # Check if already rated either game
+            author_seen = seen.get(preference.author, set())
+            already_rated = any(g in author_seen for g in preference.games)
+
+            # Add to seen (always, regardless of validity)
+            if preference.author not in seen:
+                seen[preference.author] = set()
+            seen[preference.author].update(preference.games)
+
+            # Skip if owns game or already rated
+            if owns_game or already_rated:
+                result.append((preference, {}, False))
+                continue
+
             # Initialize ratings for new games
             for game in preference.games:
                 if game not in ratings:
@@ -360,9 +421,82 @@ class EloRatingSystem:
                 game: (before_values[game], ratings[game])
                 for game in preference.games
             }
-            result.append((preference, elo_changes))
+            result.append((preference, elo_changes, True))
 
         return result
+
+    def replay_excluding_authors(
+        self,
+        preferences: list[Preference],
+        excluded_authors: frozenset[str],
+        author_teams: dict[str, str | None] | None = None,
+    ) -> dict[str, float]:
+        """Replay preferences excluding specific authors, return final ratings.
+
+        Args:
+            preferences: List of preferences in chronological order.
+            excluded_authors: Set of author emails to exclude.
+            author_teams: Mapping of author email to their team_id (or None if no team).
+                If provided, preferences where author owns a game will be skipped.
+
+        Returns:
+            dict[str, float]: Final ratings for each game.
+        """
+        ratings: dict[str, float] = {}
+        seen: dict[str, set[str]] = {}
+
+        for preference in preferences:
+            if preference.author in excluded_authors:
+                continue
+
+            # Check if author owns either game
+            owns_game = False
+            if author_teams is not None:
+                author_team = author_teams.get(preference.author)
+                if author_team is not None:
+                    owns_game = author_team in preference.games
+
+            # Check if already rated either game
+            author_seen = seen.get(preference.author, set())
+            already_rated = any(g in author_seen for g in preference.games)
+
+            # Add to seen (always, regardless of validity)
+            if preference.author not in seen:
+                seen[preference.author] = set()
+            seen[preference.author].update(preference.games)
+
+            # Skip if owns game or already rated
+            if owns_game or already_rated:
+                continue
+
+            # Initialize ratings for new games
+            for game in preference.games:
+                if game not in ratings:
+                    ratings[game] = self.initial
+
+            # Calculate expected scores
+            expected_first = 1 / (
+                1
+                + 10
+                ** ((ratings[preference.games[1]] - ratings[preference.games[0]]) / 400)
+            )
+            expected_second = 1 - expected_first
+
+            # Update ratings
+            ratings[preference.games[0]] += self.k * (
+                preference.first_score - expected_first
+            )
+            ratings[preference.games[1]] += self.k * (
+                (1 - preference.first_score) - expected_second
+            )
+
+            # Normalize if any rating went negative
+            min_score = min(ratings.values())
+            if min_score < 0:
+                for game in ratings:
+                    ratings[game] -= min_score
+
+        return ratings
 
 
 class RAMPreferenceStore:
@@ -373,14 +507,16 @@ class RAMPreferenceStore:
     async def get(self, key: uuid.UUID) -> Preference | None:
         return self.preferences[key]
 
-    async def set(self, key: uuid.UUID, value: Preference) -> None:
+    async def set(
+        self, key: uuid.UUID, value: Preference, owns_game: bool = False
+    ) -> None:
         preference_exists = key in self.preferences
         self.preferences[key] = value
         if preference_exists:
             await self.rebuild()
         else:
             for rating_system in self.rating_systems:
-                await rating_system.register(value)
+                await rating_system.register(value, owns_game=owns_game)
 
     async def delete(self, key: uuid.UUID) -> None:
         del self.preferences[key]
