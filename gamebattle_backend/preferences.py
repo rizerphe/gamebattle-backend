@@ -82,6 +82,23 @@ class PreferenceStore(Protocol):
             preference_author_email (str): The email of the preference author
         """
 
+    async def all_accumulations(self) -> dict[str, float]:
+        """Get the accumulation of preferences for all users in one pass.
+
+        Returns:
+            dict[str, float]: A mapping from normalized email to accumulation
+        """
+
+    async def normalize_email(self, email: str) -> str:
+        """Normalize an email address.
+
+        Args:
+            email (str): The email to normalize
+
+        Returns:
+            str: The normalized email
+        """
+
     async def bind(self, rating_system: RatingSystem) -> None:
         """Bind a rating system.
 
@@ -380,6 +397,30 @@ class RAMPreferenceStore:
 
     async def sorted_preferences(self) -> list[Preference]:
         return sorted(self.preferences.values(), key=lambda x: x.timestamp)
+
+    async def accumulation_of_preferences_by(
+        self, preference_author_email: str
+    ) -> float:
+        """Get the accumulation of preferences by a user."""
+        n_preferences: float = 0
+        for preference in self.preferences.values():
+            if preference.author == preference_author_email:
+                n_preferences += preference.accummulation
+        return n_preferences
+
+    async def all_accumulations(self) -> dict[str, float]:
+        """Get the accumulation of preferences for all users in one pass."""
+        accumulations: dict[str, float] = {}
+        for preference in self.preferences.values():
+            author = preference.author
+            accumulations[author] = (
+                accumulations.get(author, 0) + preference.accummulation
+            )
+        return accumulations
+
+    async def normalize_email(self, email: str) -> str:
+        """Normalize an email address (no-op for RAM store)."""
+        return email
 
     async def rebuild(self) -> None:
         for rating_system in self.rating_systems:

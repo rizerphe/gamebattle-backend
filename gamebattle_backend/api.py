@@ -714,14 +714,73 @@ class GamebattleApi:
     ) -> list[tuple[str, GameMeta, Stats]]:
         if owner not in self.admin_emails:
             raise fastapi.HTTPException(status_code=400, detail="Cannot get all stats.")
-        return sorted(
-            [
-                (player, game_meta, stats)
-                for game_meta in self.launcher.games
-                for player, stats in await self.admin_stats(game_meta.team_id, owner)
-            ],
-            key=lambda x: x[0],
+
+        # Compute expensive operations once
+        top = await self.leaderboard()
+        all_accumulations = await self.preference_store.all_accumulations()
+
+        # Collect all unique player emails and normalize them in parallel
+        all_players: set[str] = set()
+        for game_meta in self.launcher.games:
+            all_players.update(self.teams[game_meta.team_id].member_emails)
+
+        normalized_emails = await asyncio.gather(
+            *[self.preference_store.normalize_email(p) for p in all_players]
         )
+        email_to_normalized = dict(zip(all_players, normalized_emails))
+
+        # Fetch per-game data in parallel
+        games = self.launcher.games
+        scores_and_played, all_reports = await asyncio.gather(
+            asyncio.gather(
+                *[
+                    self.rating_system.score_and_played_if_exists(g.team_id)
+                    for g in games
+                ]
+            ),
+            asyncio.gather(
+                *[self.rating_system.fetch_reports(g.team_id) for g in games]
+            ),
+        )
+
+        results: list[tuple[str, GameMeta, Stats]] = []
+        for game_meta, (score, n_played), reports in zip(
+            games, scores_and_played, all_reports
+        ):
+            team_id = game_meta.team_id
+
+            for player in self.teams[team_id].member_emails:
+                # Get accumulation from pre-computed dict
+                normalized_player = email_to_normalized[player]
+                accumulation = all_accumulations.get(normalized_player, 0)
+
+                stats = Stats(
+                    permitted=True,
+                    started=self.enable_competition,
+                    elo=score,
+                    max_elo=top[0].score if top else 1,
+                    place=(
+                        next(
+                            (
+                                i + 1
+                                for i, rating in enumerate(top)
+                                if score >= rating.score
+                            ),
+                            None,
+                        )
+                        if score
+                        else len(top)
+                    ),
+                    places=len(top) or 1,
+                    accumulation=accumulation,
+                    required_accumulation=5,
+                    reports=len(reports),
+                    times_played=n_played,
+                    game_name=game_meta.name,
+                )
+                results.append((player, game_meta, stats))
+
+        return sorted(results, key=lambda x: x[0])
 
     async def admin_allstats_csv(
         self,

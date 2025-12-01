@@ -94,17 +94,38 @@ class RedisPreferenceStore:
         Args:
             preference_author_email (str): The email of the preference author
         """
-        n_preferences: float = 0
+        all_accumulations = await self.all_accumulations()
+        normalized_target = (
+            await self.normalizer.normalize(preference_author_email)
+        ).normalized_address
+        return all_accumulations.get(normalized_target, 0)
+
+    async def all_accumulations(self) -> dict[str, float]:
+        """Get the accumulation of preferences for all users in one pass.
+
+        Returns:
+            dict[str, float]: A mapping from normalized email to accumulation
+        """
+        accumulations: dict[str, float] = {}
         async for preference in self.get_all_preferences():
             normalized_author = (
                 await self.normalizer.normalize(preference.author)
             ).normalized_address
-            normalized_target = (
-                await self.normalizer.normalize(preference_author_email)
-            ).normalized_address
-            if normalized_author == normalized_target:
-                n_preferences += preference.accummulation
-        return n_preferences
+            accumulations[normalized_author] = (
+                accumulations.get(normalized_author, 0) + preference.accummulation
+            )
+        return accumulations
+
+    async def normalize_email(self, email: str) -> str:
+        """Normalize an email address.
+
+        Args:
+            email (str): The email to normalize
+
+        Returns:
+            str: The normalized email
+        """
+        return (await self.normalizer.normalize(email)).normalized_address
 
     async def bind(self, rating_system: RatingSystem) -> None:
         """Bind a rating system.
