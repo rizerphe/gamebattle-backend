@@ -1,6 +1,7 @@
 """Redis report store."""
 
 import json
+import time
 import uuid
 
 import redis.asyncio as redis
@@ -33,6 +34,7 @@ class RedisReportStore:
                 reason=report.get("reason", ""),
                 output=report.get("output", ""),
                 author=report.get("author", "unknown"),
+                timestamp=report.get("timestamp"),  # None if missing (legacy)
             )
             for report in map(json.loads, report_data)
         )
@@ -47,6 +49,7 @@ class RedisReportStore:
         Returns:
             int: The length of the list after the push operation.
         """
+        timestamp = value.timestamp if value.timestamp is not None else time.time()
         return await self.client.rpush(
             f"report:{key}",
             json.dumps(
@@ -56,6 +59,7 @@ class RedisReportStore:
                     "reason": value.reason,
                     "output": value.output,
                     "author": value.author,
+                    "timestamp": timestamp,
                 }
             ),
         )
@@ -103,3 +107,17 @@ class RedisReportStore:
         """
         members = await self.client.smembers("excluded_games")
         return {m.decode() if isinstance(m, bytes) else m for m in members}
+
+    async def get_all_reports(self) -> dict[str, tuple[Report, ...]]:
+        """Get all reports across all games.
+
+        Returns:
+            dict[str, tuple[Report, ...]]: Mapping from team_id to reports
+        """
+        all_reports: dict[str, tuple[Report, ...]] = {}
+        async for key in self.client.scan_iter(match="report:*"):
+            team_id = key.decode("utf-8", errors="ignore").split(":", 1)[1]
+            reports = await self.get(team_id)
+            if reports:
+                all_reports[team_id] = reports
+        return all_reports

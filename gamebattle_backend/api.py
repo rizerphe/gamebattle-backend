@@ -102,6 +102,37 @@ class HypotheticalLeaderboardEntry:
     owned_by_excluded: bool
 
 
+@dataclass
+class ReportHistoryEntry:
+    """A report history entry."""
+
+    type: Literal["report"]
+    game_team_id: str
+    game_name: str
+    reporter: str
+    short_reason: Literal["unclear", "buggy", "other"]
+    timestamp: float | None  # None for legacy reports
+    report_url: str
+
+
+@dataclass
+class PreferenceHistoryEntryTyped:
+    """A preference history entry with type field for combined history."""
+
+    type: Literal["preference"]
+    games: tuple[str, str]
+    game_names: tuple[str, str]
+    first_score: float
+    author: str
+    author_team: str | None
+    timestamp: float
+    elo_changes: list[EloChange]
+    counted: bool
+
+
+HistoryEntry = ReportHistoryEntry | PreferenceHistoryEntryTyped
+
+
 def firebase_email(
     res: fastapi.Response,
     credential: HTTPAuthorizationCredentials = fastapi.Depends(
@@ -1131,6 +1162,93 @@ class GamebattleApi:
             for preference, elo_changes, counted in history
         ]
 
+    async def admin_history(
+        self,
+        owner: str = fastapi.Depends(firebase_email),
+    ) -> list[HistoryEntry]:
+        """Get the combined history of preferences and reports.
+
+        Non-timestamped reports come first, then all timestamped items sorted by timestamp.
+
+        Args:
+            owner: The user ID of the session owner.
+        """
+        if owner not in self.admin_emails:
+            raise fastapi.HTTPException(status_code=403, detail="You are not an admin.")
+
+        # Fetch preferences and build preference history entries
+        preferences = await self.preference_store.sorted_preferences()
+
+        unique_authors = list({preference.author for preference in preferences})
+        teams = await asyncio.gather(
+            *[self.teams.team_of(author) for author in unique_authors]
+        )
+        author_team_name_map = {
+            author: team.name if team else None
+            for author, team in zip(unique_authors, teams)
+        }
+        author_team_id_map: dict[str, str | None] = {
+            author: team.id if team else None
+            for author, team in zip(unique_authors, teams)
+        }
+
+        history = self.rating_system.replay_with_history(preferences, author_team_id_map)
+        preference_entries: list[HistoryEntry] = [
+            PreferenceHistoryEntryTyped(
+                type="preference",
+                games=preference.games,
+                game_names=(
+                    self.launcher[preference.games[0]].name
+                    if preference.games[0] in self.launcher
+                    else preference.games[0],
+                    self.launcher[preference.games[1]].name
+                    if preference.games[1] in self.launcher
+                    else preference.games[1],
+                ),
+                first_score=preference.first_score,
+                author=preference.author,
+                author_team=author_team_name_map[preference.author],
+                timestamp=preference.timestamp,
+                elo_changes=[
+                    EloChange(team_id=team_id, before=before, after=after)
+                    for team_id, (before, after) in elo_changes.items()
+                ],
+                counted=counted,
+            )
+            for preference, elo_changes, counted in history
+        ]
+
+        # Fetch all reports and build report history entries
+        all_reports = await self.rating_system.reports.get_all_reports()
+        report_entries: list[HistoryEntry] = []
+        for team_id, reports in all_reports.items():
+            game_name = (
+                self.launcher[team_id].name if team_id in self.launcher else team_id
+            )
+            for idx, report in enumerate(reports):
+                report_entries.append(
+                    ReportHistoryEntry(
+                        type="report",
+                        game_team_id=team_id,
+                        game_name=game_name,
+                        reporter=report.author,
+                        short_reason=report.short_reason,
+                        timestamp=report.timestamp,
+                        report_url=f"https://gamebattle.r1a.nl/report/{team_id}/{idx + 1}",
+                    )
+                )
+
+        # Combine: non-timestamped reports first, then timestamped items by timestamp
+        non_timestamped: list[HistoryEntry] = [
+            e for e in report_entries if e.timestamp is None
+        ]
+        timestamped: list[HistoryEntry] = list(preference_entries) + [
+            e for e in report_entries if e.timestamp is not None
+        ]
+        timestamped.sort(key=lambda e: e.timestamp or 0)
+
+        return non_timestamped + timestamped
+
     async def admin_hypothetical_leaderboard(
         self,
         excluded_emails: list[str] = fastapi.Body(...),
@@ -1237,6 +1355,7 @@ class GamebattleApi:
         api.delete("/admin/games/{team_id}/exclude")(self.include_game)
         api.get("/admin/games/excluded")(self.excluded_games)
         api.get("/admin/preferences/history")(self.admin_preference_history)
+        api.get("/admin/history")(self.admin_history)
         api.post("/admin/leaderboard/hypothetical")(self.admin_hypothetical_leaderboard)
         api.get("/sessions/{session_id}/preference")(self.get_preference)
         api.post("/sessions/{session_id}/preference")(self.set_preference)

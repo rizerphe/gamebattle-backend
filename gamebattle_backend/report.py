@@ -14,3 +14,4 @@ class Report:
     reason: str
     output: str | None
     author: str
+    timestamp: float | None = None  # None for legacy reports without timestamps

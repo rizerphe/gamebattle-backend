@@ -176,6 +176,13 @@ class ReportStore(Protocol):
             set[str]: Set of excluded team IDs
         """
 
+    async def get_all_reports(self) -> dict[str, tuple[Report, ...]]:
+        """Get all reports across all games.
+
+        Returns:
+            dict[str, tuple[Report, ...]]: Mapping from team_id to reports
+        """
+
 
 class RatingSystem(Protocol):
     """A rating system for games"""
