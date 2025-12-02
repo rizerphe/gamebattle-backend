@@ -111,11 +111,12 @@ class ReportHistoryEntry:
     game_name: str
     reporter: str
     short_reason: Literal["unclear", "buggy", "other"]
-    reason: str
-    output: str | None  # Base64-encoded logs, if captured
-    session: str  # Session UUID as string
     timestamp: float | None  # None for legacy reports
     report_url: str
+    # Detailed fields (only included when include_report_details=True)
+    reason: str | None = None
+    output: str | None = None  # Base64-encoded logs, if captured
+    session: str | None = None  # Session UUID as string
 
 
 @dataclass
@@ -1167,6 +1168,7 @@ class GamebattleApi:
 
     async def admin_history(
         self,
+        include_report_details: bool = False,
         owner: str = fastapi.Depends(firebase_email),
     ) -> list[HistoryEntry]:
         """Get the combined history of preferences and reports.
@@ -1174,6 +1176,7 @@ class GamebattleApi:
         Non-timestamped reports come first, then all timestamped items sorted by timestamp.
 
         Args:
+            include_report_details: Whether to include full report data (reason, output, session).
             owner: The user ID of the session owner.
         """
         if owner not in self.admin_emails:
@@ -1236,11 +1239,11 @@ class GamebattleApi:
                         game_name=game_name,
                         reporter=report.author,
                         short_reason=report.short_reason,
-                        reason=report.reason,
-                        output=report.output,
-                        session=str(report.session),
                         timestamp=report.timestamp,
                         report_url=f"https://gamebattle.r1a.nl/report/{team_id}/{idx + 1}",
+                        reason=report.reason if include_report_details else None,
+                        output=report.output if include_report_details else None,
+                        session=str(report.session) if include_report_details else None,
                     )
                 )
 
