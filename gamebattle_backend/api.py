@@ -111,6 +111,9 @@ class ReportHistoryEntry:
     game_name: str
     reporter: str
     short_reason: Literal["unclear", "buggy", "other"]
+    reason: str
+    output: str | None  # Base64-encoded logs, if captured
+    session: str  # Session UUID as string
     timestamp: float | None  # None for legacy reports
     report_url: str
 
@@ -1233,6 +1236,9 @@ class GamebattleApi:
                         game_name=game_name,
                         reporter=report.author,
                         short_reason=report.short_reason,
+                        reason=report.reason,
+                        output=report.output,
+                        session=str(report.session),
                         timestamp=report.timestamp,
                         report_url=f"https://gamebattle.r1a.nl/report/{team_id}/{idx + 1}",
                     )
