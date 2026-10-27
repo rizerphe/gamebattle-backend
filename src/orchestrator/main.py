@@ -16,9 +16,12 @@ from orchestrator.admin.routes import router as admin_router
 from orchestrator.comparisons.mongo import create_indexes as create_comparison_indexes
 from orchestrator.comparisons.routes import router as comparisons_router
 from orchestrator.comparisons.service import Comparisons
+from orchestrator.fairness.routes import router as fairness_router
+from orchestrator.fairness.service import FairnessChecks
 from orchestrator.files.mongo import create_indexes
 from orchestrator.files.routes import router as files_router
 from orchestrator.games.routes import router as games_router
+from orchestrator.llm import LlmClient
 from orchestrator.phases.routes import router as phases_router
 from orchestrator.phases.sweep import sweep_forever
 from orchestrator.players.routes import router as players_router
@@ -27,6 +30,7 @@ from orchestrator.sessions.mongo import create_indexes as create_session_indexes
 from orchestrator.sessions.routes import router as sessions_router
 from orchestrator.sessions.service import Sessions
 from orchestrator.summary.routes import router as summary_router
+from orchestrator.summary.service import Summaries
 from orchestrator.settings import Settings
 from orchestrator.stats.routes import router as stats_router
 from orchestrator.stats.service import StatsService
@@ -79,14 +83,23 @@ def create_app() -> FastAPI:
             avatars = open_avatar_store(config)
             await avatars.ensure_bucket()
             app.state.avatars = avatars
-            app.state.sessions = Sessions(
-                store,
-                TerminalClient(http, config.terminal_service_url, config.service_token),
+            terminals = TerminalClient(http, config.terminal_service_url, config.service_token)
+            app.state.sessions = Sessions(store, terminals)
+            llm = (
+                LlmClient(http, config.llm_base_url, config.llm_api_key, config.llm_model)
+                if config.llm_api_key
+                else None
             )
+            if llm is None:
+                logger.info("LLM_API_KEY is not set: AI features are off")
+            app.state.summaries = Summaries(llm)
             ui_url = next((o for o in config.cors_origins if o != "*"), None)
             app.state.notifier = Notifier(store, http, ui_url)
             app.state.comparisons = Comparisons(
-                store, app.state.sessions, notifier=app.state.notifier
+                store,
+                app.state.sessions,
+                notifier=app.state.notifier,
+                fairness=FairnessChecks(store, terminals, llm),
             )
             app.state.stats = StatsService(db, app.state.comparisons)
             app.state.users = FirebaseUsers(
@@ -114,6 +127,7 @@ def create_app() -> FastAPI:
     app.include_router(avatars_router)
     app.include_router(admin_router)
     app.include_router(comparisons_router)
+    app.include_router(fairness_router)
     app.include_router(files_router)
     app.include_router(games_router)
     app.include_router(phases_router)

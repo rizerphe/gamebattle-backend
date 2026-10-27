@@ -23,6 +23,7 @@ from orchestrator.comparisons.models import (
 from orchestrator.comparisons.service import (
     AlreadyRated,
     Comparisons,
+    NeedsConfirmation,
     OwnGame,
     Unavailable,
     Unfinished,
@@ -51,6 +52,7 @@ class FileReport:
 @dataclass(frozen=True)
 class Rate:
     score: float
+    confirmed: bool = False
 
 
 @router.get("/leaderboard")
@@ -171,9 +173,13 @@ async def rate(
     if not math.isfinite(body.score) or not 0 <= body.score <= 1:
         raise HTTPException(400, "invalid rating")
     try:
-        comparison = await comparisons.rate(owner, comparison_id, body.score)
+        comparison = await comparisons.rate(
+            owner, comparison_id, body.score, body.confirmed
+        )
     except Unfinished as error:
         raise HTTPException(409, "games have not finished") from error
+    except NeedsConfirmation as error:
+        raise HTTPException(409, "rating needs confirmation") from error
     except Missing as error:
         raise HTTPException(404, "comparison not found") from error
     except TerminalError as error:

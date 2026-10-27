@@ -27,6 +27,15 @@ class TerminalError(Exception):
 
 
 @dataclass(frozen=True)
+class Transcript:
+    """The last of what a program printed. ``skipped`` characters came before ``text``."""
+
+    duration: float
+    skipped: int
+    text: str
+
+
+@dataclass(frozen=True)
 class Launch:
     terminal_id: str
     game_revision: str
@@ -53,6 +62,8 @@ class Terminals(Protocol):
     async def recording(self, terminal_id: str, at: float) -> RecordingChunk: ...
 
     async def events(self, terminal_id: str) -> list[TerminalEvent]: ...
+
+    async def transcript(self, terminal_id: str, tail: int) -> Transcript: ...
 
 
 class TerminalClient:
@@ -170,6 +181,18 @@ class TerminalClient:
             TerminalEvent(sequence=event["sequence"], elapsed=event["elapsed"], type=event["type"])
             for event in response.json()
         ]
+
+    async def transcript(self, terminal_id: str, tail: int) -> Transcript:
+        response = await self._http.get(
+            f"{self._base}/sessions/{terminal_id}/transcript",
+            headers=self._headers,
+            params={"tail": tail},
+        )
+        self._raise_for_status(response)
+        body = response.json()
+        return Transcript(
+            duration=float(body["duration"]), skipped=int(body["skipped"]), text=body["text"]
+        )
 
     @staticmethod
     def _raise_for_status(response: httpx.Response) -> None:

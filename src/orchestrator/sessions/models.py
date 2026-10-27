@@ -14,6 +14,24 @@ from uuid import UUID
 SessionKind = Literal["test", "admin", "comparison"]
 
 
+# What the model thinks of a finished comparison session: did the player play
+# enough to judge the game? A teacher can also set ``verified_not_enough``.
+FairnessVerdict = Literal["enough", "unsure", "not_enough"]
+FairnessOverride = Literal["enough", "unsure", "not_enough", "verified_not_enough"]
+
+
+@dataclass(frozen=True)
+class Fairness:
+    """The model's answer for a session. ``verdict`` is unset when it timed out or failed."""
+
+    status: Literal["done", "timeout", "error"]
+    verdict: FairnessVerdict | None
+    reason: str | None
+    duration: float | None
+    model: str
+    evaluated_at: float
+
+
 @dataclass(frozen=True)
 class Session:
     id: UUID
@@ -24,6 +42,8 @@ class Session:
     recording_seconds: float = 0.0
     kind: SessionKind = "test"
     closed_at: float | None = None
+    fairness: Fairness | None = None
+    fairness_override: FairnessOverride | None = None
 
 
 @dataclass(frozen=True)

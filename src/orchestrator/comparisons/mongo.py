@@ -12,7 +12,7 @@ from pymongo import ASCENDING, DESCENDING
 from pymongo.asynchronous.database import AsyncDatabase
 
 from orchestrator.comparisons.models import Comparison, RankedGame
-from orchestrator.comparisons.pairing import INITIAL_ELO, updated_elos
+from orchestrator.comparisons.pairing import INITIAL_ELO
 from orchestrator.sessions.mongo import MongoSessions
 
 
@@ -84,13 +84,32 @@ class MongoComparisons:
             raise KeyError(comparison_id)
         return found
 
-    async def record_rating(self, comparison_id: UUID, score: float) -> bool:
+    async def record_rating(
+        self, comparison_id: UUID, score: float, rated_at: float, confirmed_warning: bool
+    ) -> bool:
         """Store the rating if it is still unset. False when another request won."""
 
         result = await self._comparisons.update_one(
-            {"_id": comparison_id, "rating": None}, {"$set": {"rating": score}}
+            {"_id": comparison_id, "rating": None},
+            {
+                "$set": {
+                    "rating": score,
+                    "rated_at": rated_at,
+                    "confirmed_warning": confirmed_warning,
+                }
+            },
         )
         return result.modified_count == 1
+
+    async def list_rated(self) -> list[Comparison]:
+        """Rated comparisons, oldest rating first."""
+
+        docs = (
+            await self._comparisons.find({"rating": {"$ne": None}})
+            .sort("rated_at", ASCENDING)
+            .to_list()
+        )
+        return [_load(document) for document in docs]
 
 
 class MongoRatings:
@@ -108,20 +127,14 @@ class MongoRatings:
         rows = await self._ratings.find({}).to_list()
         return {row["_id"]: (float(row["elo"]), int(row["plays"])) for row in rows}
 
-    async def apply(self, left: UUID, right: UUID, score: float) -> None:
-        elo_left, plays_left = await self.get(left)
-        elo_right, plays_right = await self.get(right)
-        new_left, new_right = updated_elos(elo_left, elo_right, score)
-        await self._ratings.update_one(
-            {"_id": left},
-            {"$set": {"elo": new_left, "plays": plays_left + 1}},
-            upsert=True,
-        )
-        await self._ratings.update_one(
-            {"_id": right},
-            {"$set": {"elo": new_right, "plays": plays_right + 1}},
-            upsert=True,
-        )
+    async def replace(self, table: dict[UUID, tuple[float, int]]) -> None:
+        """Make ``table`` the ratings: upsert every row, then drop the rest."""
+
+        for game_id, (elo, plays) in table.items():
+            await self._ratings.update_one(
+                {"_id": game_id}, {"$set": {"elo": elo, "plays": plays}}, upsert=True
+            )
+        await self._ratings.delete_many({"_id": {"$nin": list(table)}})
 
     async def ranking(self) -> list[RankedGame]:
         rows = await self._ratings.find({"plays": {"$gt": 0}}).to_list()
@@ -155,6 +168,8 @@ def _dump(comparison: Comparison) -> dict[str, Any]:
         "exited": list(comparison.exited),
         "started_at": comparison.started_at,
         "abandoned": comparison.abandoned,
+        "rated_at": comparison.rated_at,
+        "confirmed_warning": comparison.confirmed_warning,
     }
 
 
@@ -168,4 +183,6 @@ def _load(document: dict[str, Any]) -> Comparison:
         exited=frozenset(document.get("exited", ())),
         started_at=float(document.get("started_at") or 0),
         abandoned=bool(document.get("abandoned", False)),
+        rated_at=document["rated_at"],
+        confirmed_warning=document["confirmed_warning"],
     )

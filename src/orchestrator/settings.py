@@ -23,6 +23,9 @@ class Settings:
     s3_avatars_bucket: str
     avatar_cache_ttl: timedelta
     required_comparisons: int
+    llm_base_url: str
+    llm_api_key: str | None
+    llm_model: str
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -48,6 +51,10 @@ class Settings:
                 seconds=_positive_int(os.environ.get("AVATAR_CACHE_TTL_SECONDS"), 86_400)
             ),
             required_comparisons=_positive_int(os.environ.get("REQUIRED_COMPARISONS"), 10),
+            llm_base_url=os.environ.get("LLM_BASE_URL", "").strip()
+            or "https://api.cerebras.ai/v1",
+            llm_api_key=os.environ.get("LLM_API_KEY", "").strip() or None,
+            llm_model=os.environ.get("LLM_MODEL", "").strip() or "gpt-oss-120b",
         )
 
 

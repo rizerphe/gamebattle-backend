@@ -6,7 +6,10 @@ counts, and a report, restart, stop, or timeout does not. An exit stays counted
 after the terminal service has forgotten the session.
 """
 
+import asyncio
 import random
+import time
+from collections.abc import Collection
 from uuid import UUID, uuid4
 
 from orchestrator.comparisons.models import (
@@ -19,7 +22,15 @@ from orchestrator.comparisons.models import (
     RankedGame,
 )
 from orchestrator.comparisons.mongo import MongoComparisons, MongoRatings
-from orchestrator.comparisons.pairing import RatedGame, choose_opponent, choose_pair
+from orchestrator.comparisons.pairing import (
+    INITIAL_ELO,
+    RatedGame,
+    choose_opponent,
+    choose_pair,
+    updated_elos,
+)
+from orchestrator.fairness.service import FairnessChecks
+from orchestrator.fairness.verdicts import side_counts, side_is_flagged
 from orchestrator.reports.models import ReportReason
 from orchestrator.reports.mongo import MongoReports
 from orchestrator.sessions.models import Session
@@ -43,6 +54,10 @@ class AlreadyRated(Exception):
     pass
 
 
+class NeedsConfirmation(Exception):
+    """A side looks under-played. Rating again with ``confirmed`` goes through."""
+
+
 class Comparisons:
     def __init__(
         self,
@@ -50,6 +65,7 @@ class Comparisons:
         sessions: Sessions,
         rng: random.Random | None = None,
         notifier: Notifier | None = None,
+        fairness: FairnessChecks | None = None,
     ):
         self.store = store
         self.sessions = sessions
@@ -57,6 +73,8 @@ class Comparisons:
         self.ratings = MongoRatings(store.db)
         self.reports = MongoReports(store.db, notifier)
         self.rng = rng or random.Random()
+        self.fairness = fairness
+        self._rebuild_lock = asyncio.Lock()
 
     async def start(self, owner: str) -> tuple[Comparison, bool]:
         """The caller's open comparison, or a new one. The bool is True when created."""
@@ -158,7 +176,16 @@ class Comparisons:
         await self.sessions.stop(previous.id, "reported")
         return await self.observe(comparison)
 
-    async def rate(self, owner: str, comparison_id: UUID, score: float) -> Comparison:
+    async def rate(
+        self, owner: str, comparison_id: UUID, score: float, confirmed: bool = False
+    ) -> Comparison:
+        """Accept a rating once both sides have exited and their fairness checks are in.
+
+        A side whose best session still looks under-played needs ``confirmed``
+        (``NeedsConfirmation`` otherwise). Elo is then rebuilt, because whether
+        a rating counts depends on those verdicts.
+        """
+
         comparison = await self.get(owner, comparison_id)
         if comparison.abandoned:
             raise Missing(comparison_id)
@@ -167,18 +194,65 @@ class Comparisons:
         sessions = await self._sessions(comparison)
         if not all(_side_ready(side, sessions, comparison.exited) for side in comparison.sessions):
             raise Unfinished
-        left = sessions[comparison.sessions[0][-1]].game
-        right = sessions[comparison.sessions[1][-1]].game
-        if not await self.records.record_rating(comparison.id, score):
+        sides = exited_sides(comparison, sessions)
+        if self.fairness is not None:
+            sessions.update(
+                await self.fairness.settle(
+                    session for side in sides for session in side
+                )
+            )
+            sides = exited_sides(comparison, sessions)
+        warned = any(side_is_flagged(side) for side in sides)
+        if warned and not confirmed:
+            raise NeedsConfirmation
+        if not await self.records.record_rating(
+            comparison.id, score, time.time(), warned and confirmed
+        ):
             stored = await self.records.get(comparison.id)
             if stored is None:
                 raise Missing(comparison_id)
             return stored
-        await self.ratings.apply(left, right, score)
+        await self.rebuild_ratings()
         stored = await self.records.get(comparison.id)
         if stored is None:
             raise Missing(comparison_id)
         return stored
+
+    async def compute_ratings(
+        self, exclude_players: Collection[UUID] = ()
+    ) -> dict[UUID, tuple[float, int]]:
+        """Elo and plays from replaying every counted rating, oldest first.
+
+        A rating counts when, on each side, at least one exited session of the
+        rated game was not judged too short. Ratings by ``exclude_players`` are skipped.
+        """
+
+        rated = await self.records.list_rated()
+        sessions = await self.sessions.get_many(
+            session_id
+            for comparison in rated
+            for side in comparison.sessions
+            for session_id in side
+        )
+        table: dict[UUID, tuple[float, int]] = {}
+        for comparison in rated:
+            if comparison.player in exclude_players or comparison.rating is None:
+                continue
+            sides = exited_sides(comparison, sessions)
+            if not all(side_counts(side) for side in sides):
+                continue
+            left = sessions[comparison.sessions[0][-1]].game
+            right = sessions[comparison.sessions[1][-1]].game
+            elo_left, plays_left = table.get(left, (INITIAL_ELO, 0))
+            elo_right, plays_right = table.get(right, (INITIAL_ELO, 0))
+            new_left, new_right = updated_elos(elo_left, elo_right, comparison.rating)
+            table[left] = (new_left, plays_left + 1)
+            table[right] = (new_right, plays_right + 1)
+        return table
+
+    async def rebuild_ratings(self) -> None:
+        async with self._rebuild_lock:
+            await self.ratings.replace(await self.compute_ratings())
 
     async def abandon_open(self) -> None:
         """Give up every unrated comparison. Their sessions are stopped separately."""
@@ -307,6 +381,9 @@ class Comparisons:
                     fresh.append(session_id)
         if not fresh:
             return comparison
+        if self.fairness is not None:
+            for session in (await self.sessions.get_many(fresh)).values():
+                self.fairness.ensure(session)
         return await self.records.remember_exits(comparison.id, fresh)
 
     async def _open(self, owner: str, comparison_id: UUID) -> Comparison:
@@ -382,6 +459,22 @@ def _activity_phase(
     ):
         return "awaiting_rating"
     return "running"
+
+
+def exited_sides(
+    comparison: Comparison, sessions: dict[UUID, Session]
+) -> tuple[list[Session], list[Session]]:
+    """Per side, the sessions of the side's current game that exited on their own."""
+
+    def pick(side: tuple[UUID, ...]) -> list[Session]:
+        current = sessions[side[-1]].game
+        return [
+            sessions[session_id]
+            for session_id in side
+            if session_id in comparison.exited and sessions[session_id].game == current
+        ]
+
+    return pick(comparison.sessions[0]), pick(comparison.sessions[1])
 
 
 def _side_ready(

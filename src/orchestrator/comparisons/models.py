@@ -22,6 +22,10 @@ class Comparison:
     exited: frozenset[UUID] = field(default_factory=frozenset)
     started_at: float = 0.0
     abandoned: bool = False
+    # When the rating was accepted, and whether the player rated anyway after a
+    # fairness warning. Both are set with ``rating``.
+    rated_at: float | None = None
+    confirmed_warning: bool = False
 
 
 @dataclass(frozen=True)

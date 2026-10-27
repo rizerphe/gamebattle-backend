@@ -12,7 +12,7 @@ from pydantic import TypeAdapter
 from pymongo import ASCENDING
 from pymongo.asynchronous.database import AsyncDatabase
 
-from orchestrator.sessions.models import Session
+from orchestrator.sessions.models import Fairness, FairnessOverride, Session
 
 _session = TypeAdapter(Session)
 
@@ -55,6 +55,20 @@ class MongoSessions:
         cursor = self._sessions.find({"kind": {"$in": kinds}, "closed_at": None})
         return [_load(doc) for doc in await cursor.to_list()]
 
+    async def set_fairness(self, session_id: UUID, fairness: Fairness) -> None:
+        await self._sessions.update_one(
+            {"_id": session_id},
+            {"$set": {"fairness": TypeAdapter(Fairness).dump_python(fairness)}},
+        )
+
+    async def set_override(self, session_id: UUID, verdict: FairnessOverride | None) -> bool:
+        """False when there is no such session."""
+
+        result = await self._sessions.update_one(
+            {"_id": session_id}, {"$set": {"fairness_override": verdict}}
+        )
+        return result.matched_count == 1
+
     async def close(self, session_id: UUID, at: float) -> None:
         await self._sessions.update_one(
             {"_id": session_id, "closed_at": None}, {"$set": {"closed_at": at}}
@@ -62,7 +76,7 @@ class MongoSessions:
 
 
 def _dump(session: Session) -> dict[str, Any]:
-    doc = _session.dump_python(session, exclude={"recording_seconds", "closed_at"})
+    doc = _session.dump_python(session, exclude={"recording_seconds", "closed_at", "fairness", "fairness_override"})
     doc["_id"] = doc.pop("id")
     doc["closed_at"] = None
     return doc
