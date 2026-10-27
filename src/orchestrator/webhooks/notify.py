@@ -32,26 +32,33 @@ class Notifier:
         self._hooks = MongoWebhooks(store.db)
         self._tasks: set[asyncio.Task[None]] = set()
 
-    async def report_filed(self, game: UUID, count: int) -> None:
-        """Tell the webhooks that asked about this report: the first one, or the count reached."""
+    async def report_filed(self, game: UUID, players: int, new_player: bool) -> None:
+        """Tell the webhooks that asked about this report.
+
+        ``players`` is how many different players have reported the published
+        version. The first report and the count reached only happen when a new
+        player reports; every report is sent regardless.
+        """
 
         hooks = await self._hooks.all()
         every = [h for h in hooks if h.event == "every_report"]
-        first = [h for h in hooks if h.event == "first_report" and count == 1]
-        reached = [h for h in hooks if h.event == "threshold" and h.threshold == count]
+        first = [h for h in hooks if h.event == "first_report" and new_player and players == 1]
+        reached = [
+            h for h in hooks if h.event == "threshold" and new_player and h.threshold == players
+        ]
         if every:
             body = await self._embed(
-                game, "Game reported", f"Report {count} on the published version.", _YELLOW, count
+                game, "Game reported", f"Reported by {_players(players)} so far.", _YELLOW, players
             )
             self._send(every, body)
         if first:
             body = await self._embed(
-                game, "First report", "The published version was reported for the first time.", _YELLOW, count
+                game, "First report", "The published version was reported for the first time.", _YELLOW, players
             )
             self._send(first, body)
         if reached:
             body = await self._embed(
-                game, f"{count} reports reached", f"{count} reports on the published version.", _YELLOW, count
+                game, f"{players} reports reached", f"Reported by {_players(players)}.", _YELLOW, players
             )
             self._send(reached, body)
 
@@ -61,7 +68,7 @@ class Notifier:
         hooks = [hook for hook in await self._hooks.all() if hook.event == "removed"]
         if not hooks:
             return
-        description = f"Taken down automatically after {count} reports."
+        description = f"Taken down automatically after reports from {_players(count)}."
         self._send(hooks, await self._embed(game, "Game removed", description, _RED, count))
 
     async def test(self, hook: Webhook) -> None:
@@ -93,7 +100,7 @@ class Notifier:
             "fields": [{"name": "Game", "value": label, "inline": True}],
         }
         if count:
-            embed["fields"].append({"name": "Reports", "value": str(count), "inline": True})
+            embed["fields"].append({"name": "Reporters", "value": str(count), "inline": True})
         if self._ui_url:
             embed["url"] = f"{self._ui_url}/admin/students/{game}/reports"
         return {"embeds": [embed]}
@@ -117,3 +124,7 @@ class Notifier:
             if raise_errors:
                 raise
             logger.warning("webhook delivery failed: %s", type(error).__name__)
+
+
+def _players(count: int) -> str:
+    return f"{count} player{'s' if count != 1 else ''}"

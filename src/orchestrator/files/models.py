@@ -10,8 +10,8 @@ of the application and exactly what the student saw in their editor.
 
 Submitted and published are pointers to clean snapshots. Moving either pointer
 does not create a snapshot, and any clean historical snapshot may be selected.
-Publishing records when the pointer moved. Five reports filed against that
-snapshot after that moment clear it. Unpublishing clears it outright.
+Publishing records when the pointer moved. Reports from five different players
+against that snapshot after that moment clear it. Unpublishing clears it outright.
 
 Each snapshot records the player who appended it. That author is the game's
 owner unless someone else, such as an admin editing the game, wrote it.

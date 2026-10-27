@@ -128,16 +128,25 @@ class Comparisons:
         side: int,
         short_reason: ReportReason,
         reason: str,
+        keep_playing: bool = False,
     ) -> Comparison:
+        """Report the side's game, then replace it unless the player keeps playing.
+
+        With no game to replace it with, the report still stands and the player
+        keeps playing the reported game.
+        """
+
         comparison = await self._open(owner, comparison_id)
         previous = await self._session(comparison.sessions[side][-1])
+        if previous.game == previous.player:
+            raise OwnGame
+        await self.reports.file(previous, short_reason, reason)
+        if keep_playing:
+            return await self.observe(comparison)
         other = await self._session(comparison.sessions[1 - side][-1])
         replacement = await self._replacement(comparison.player, other.game, previous.game)
-        existing = await self.reports.get(previous)
-        if existing is None:
-            if previous.game == previous.player:
-                raise OwnGame
-            await self.reports.file(previous, short_reason, reason)
+        if replacement is None:
+            return await self.observe(comparison)
         launched = await self.sessions.launch(
             owner,
             replacement.id,
@@ -340,11 +349,13 @@ class Comparisons:
             chosen.append(RatedGame(game_id, elo, plays))
         return chosen
 
-    async def _replacement(self, player: UUID, other: UUID, reported: UUID) -> RatedGame:
+    async def _replacement(
+        self, player: UUID, other: UUID, reported: UUID
+    ) -> RatedGame | None:
         elo, plays = await self.ratings.get(other)
         candidates = await self._candidates(player, exclude={other, reported}, minimum=1)
         if not candidates:
-            raise Unavailable("no replacement game")
+            return None
         return choose_opponent(RatedGame(other, elo, plays), candidates, self.rng)
 
     async def _session(self, session_id: UUID) -> Session:

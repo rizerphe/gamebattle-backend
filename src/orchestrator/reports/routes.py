@@ -1,6 +1,7 @@
 """Reports over HTTP.
 
-The player of a session files its report, which ends the session. Only admins
+The player of a session files its report, which ends the session unless the
+player asks to keep playing. Only admins
 read reports, including the reporter's own, and replay the reported session
 through ``/sessions``.
 """
@@ -12,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from orchestrator.auth import AdminRequired, CallerDep, Owner
 from orchestrator.dependencies import NotifierDep, SessionsDep, StoreDep
-from orchestrator.reports.enrich import enrich_report, enrich_reports
+from orchestrator.reports.enrich import enrich_reports
 from orchestrator.reports.models import FiledReport, Report, ReportReason
 from orchestrator.reports.mongo import MongoReports
 from orchestrator.sessions.models import Session
@@ -29,6 +30,7 @@ _MAX_REASON_LENGTH = 4000
 class FileReport:
     short_reason: ReportReason
     reason: str = ""
+    keep_playing: bool = False
 
 
 @router.put("/sessions/{session_id}/report")
@@ -47,27 +49,26 @@ async def file_report(
     if len(reason) > _MAX_REASON_LENGTH:
         raise HTTPException(400, "invalid report reason")
     report = await MongoReports(store.db, notifier).file(session, body.short_reason, reason)
-    try:
-        await sessions.stop(session.id, "reported")
-    except TerminalError as error:
-        status = error.status if error.status in (400, 404, 503) else 502
-        raise HTTPException(status, error.message) from error
+    if not body.keep_playing:
+        try:
+            await sessions.stop(session.id, "reported")
+        except TerminalError as error:
+            status = error.status if error.status in (400, 404, 503) else 502
+            raise HTTPException(status, error.message) from error
     return FiledReport(report.short_reason, report.reason, report.timestamp)
 
 
-@router.get("/sessions/{session_id}/report")
-async def read_report(
+@router.get("/sessions/{session_id}/reports")
+async def session_reports(
     session_id: UUID,
     store: StoreDep,
     sessions: SessionsDep,
     caller: CallerDep,
     _admin: AdminRequired,
-) -> Report:
+) -> list[Report]:
     session = await _session(sessions, caller.owner, session_id, any_player=True)
-    report = await MongoReports(store.db).get(session)
-    if report is None:
-        raise HTTPException(404, "report not found")
-    return await enrich_report(sessions, report)
+    reports = await MongoReports(store.db).for_session(session)
+    return await enrich_reports(sessions, reports)
 
 
 @router.get("/reports")

@@ -1,17 +1,19 @@
 """Reports against a game, filed from the session that played it.
 
-A report belongs to exactly one session, and a session has at most one report.
-The game, its revision, and the reporter are the session's; the report does not
-repeat them. Filing a report ends the session, so the end of its event log is
-the moment of the report.
+A report belongs to one session; a session may collect several, and a player
+may report the same game again. The game, its revision, and the reporter are the
+session's; the report does not repeat them. A report may end its session or let
+it keep running, so the report's timestamp is its moment in the recording.
 
-Five reports against the snapshot that is published, filed after that snapshot
-was published, clear the pointer. Reports of any other snapshot do not, and
+Reports from five different players against the snapshot that is published,
+filed after that snapshot was published, clear the pointer. Repeat reports by
+one player count once. Reports of any other snapshot do not count, and
 publishing again starts the count over.
 """
 
 from dataclasses import dataclass
 from enum import StrEnum
+from uuid import UUID
 
 from orchestrator.sessions.models import Session
 
@@ -33,6 +35,7 @@ class FiledReport:
 
 @dataclass(frozen=True)
 class Report:
+    id: UUID
     session: Session
     short_reason: ReportReason
     reason: str

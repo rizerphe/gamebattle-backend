@@ -45,6 +45,7 @@ Side = Annotated[int, Path(ge=0, le=1)]
 class FileReport:
     short_reason: ReportReason
     reason: str = ""
+    keep_playing: bool = False
 
 
 @dataclass(frozen=True)
@@ -138,7 +139,7 @@ async def report(
         raise HTTPException(400, "invalid report reason")
     try:
         comparison = await comparisons.report(
-            owner, comparison_id, side, body.short_reason, reason
+            owner, comparison_id, side, body.short_reason, reason, body.keep_playing
         )
     except AlreadyRated as error:
         raise HTTPException(409, "comparison already rated") from error
