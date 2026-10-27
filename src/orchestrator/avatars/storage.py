@@ -36,6 +36,7 @@ class S3AvatarStore:
         bucket: str,
     ) -> None:
         self._bucket = bucket
+        self._region = region
         self._client = boto3.client(
             "s3",
             endpoint_url=endpoint,
@@ -48,8 +49,24 @@ class S3AvatarStore:
         def _ensure() -> None:
             try:
                 self._client.head_bucket(Bucket=self._bucket)
-            except ClientError:
+                return
+            except ClientError as error:
+                code = str(error.response.get("Error", {}).get("Code"))
+                if code in {"301", "PermanentRedirect"}:
+                    raise RuntimeError(
+                        f"bucket {self._bucket!r} exists in a different region than "
+                        f"S3_REGION={self._region!r} / S3_ENDPOINT; make them match "
+                        "the bucket's region"
+                    ) from error
+                if code not in {"404", "NoSuchBucket", "NotFound"}:
+                    raise
+            if self._region == "us-east-1":
                 self._client.create_bucket(Bucket=self._bucket)
+            else:
+                self._client.create_bucket(
+                    Bucket=self._bucket,
+                    CreateBucketConfiguration={"LocationConstraint": self._region},
+                )
 
         await asyncio.to_thread(_ensure)
 
