@@ -11,7 +11,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query
 
 from orchestrator.auth import AdminRequired, CallerDep, Owner
-from orchestrator.dependencies import SessionsDep, StoreDep
+from orchestrator.dependencies import NotifierDep, SessionsDep, StoreDep
 from orchestrator.reports.enrich import enrich_report, enrich_reports
 from orchestrator.reports.models import FiledReport, Report, ReportReason
 from orchestrator.reports.mongo import MongoReports
@@ -33,7 +33,12 @@ class FileReport:
 
 @router.put("/sessions/{session_id}/report")
 async def file_report(
-    session_id: UUID, body: FileReport, store: StoreDep, sessions: SessionsDep, owner: Owner
+    session_id: UUID,
+    body: FileReport,
+    store: StoreDep,
+    sessions: SessionsDep,
+    notifier: NotifierDep,
+    owner: Owner,
 ) -> FiledReport:
     session = await _session(sessions, owner, session_id)
     if session.game == session.player:
@@ -41,7 +46,7 @@ async def file_report(
     reason = body.reason.strip()
     if len(reason) > _MAX_REASON_LENGTH:
         raise HTTPException(400, "invalid report reason")
-    report = await MongoReports(store.db).file(session, body.short_reason, reason)
+    report = await MongoReports(store.db, notifier).file(session, body.short_reason, reason)
     try:
         await sessions.stop(session.id, "reported")
     except TerminalError as error:

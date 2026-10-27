@@ -26,6 +26,7 @@ from orchestrator.sessions.models import Session
 from orchestrator.sessions.recording import enrich_sessions
 from orchestrator.sessions.service import Sessions
 from orchestrator.store import Missing, Store
+from orchestrator.webhooks.notify import Notifier
 
 
 class Unavailable(Exception):
@@ -44,13 +45,17 @@ class AlreadyRated(Exception):
 
 class Comparisons:
     def __init__(
-        self, store: Store, sessions: Sessions, rng: random.Random | None = None
+        self,
+        store: Store,
+        sessions: Sessions,
+        rng: random.Random | None = None,
+        notifier: Notifier | None = None,
     ):
         self.store = store
         self.sessions = sessions
         self.records = MongoComparisons(store.db)
         self.ratings = MongoRatings(store.db)
-        self.reports = MongoReports(store.db)
+        self.reports = MongoReports(store.db, notifier)
         self.rng = rng or random.Random()
 
     async def start(self, owner: str) -> tuple[Comparison, bool]:

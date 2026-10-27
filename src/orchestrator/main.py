@@ -35,6 +35,8 @@ from orchestrator.submissions.firebase import FirebaseUsers
 from orchestrator.submissions.routes import router as submissions_router
 from orchestrator.terminal_client import TerminalClient
 from orchestrator.tokens import FirebaseTokenVerifier
+from orchestrator.webhooks.notify import Notifier
+from orchestrator.webhooks.routes import router as webhooks_router
 
 logger = logging.getLogger("orchestrator")
 
@@ -81,7 +83,11 @@ def create_app() -> FastAPI:
                 store,
                 TerminalClient(http, config.terminal_service_url, config.service_token),
             )
-            app.state.comparisons = Comparisons(store, app.state.sessions)
+            ui_url = next((o for o in config.cors_origins if o != "*"), None)
+            app.state.notifier = Notifier(store, http, ui_url)
+            app.state.comparisons = Comparisons(
+                store, app.state.sessions, notifier=app.state.notifier
+            )
             app.state.stats = StatsService(db, app.state.comparisons)
             app.state.users = FirebaseUsers(
                 config.firebase_credentials, config.firebase_project_id, http
@@ -117,6 +123,7 @@ def create_app() -> FastAPI:
     app.include_router(stats_router)
     app.include_router(submissions_router)
     app.include_router(summary_router)
+    app.include_router(webhooks_router)
     return app
 
 

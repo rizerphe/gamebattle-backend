@@ -6,6 +6,7 @@ from orchestrator.auth import Owner
 from orchestrator.comparisons.service import Comparisons
 from orchestrator.sessions.service import Sessions
 from orchestrator.store import Player, Store
+from orchestrator.webhooks.notify import Notifier
 
 
 def get_store(request: Request) -> Store:
@@ -27,6 +28,13 @@ def get_comparisons(request: Request) -> Comparisons:
 
 
 ComparisonsDep = Annotated[Comparisons, Depends(get_comparisons)]
+
+
+def get_notifier(request: Request) -> Notifier:
+    return request.app.state.notifier
+
+
+NotifierDep = Annotated[Notifier, Depends(get_notifier)]
 
 
 def get_player(store: StoreDep, owner: Owner) -> Player:

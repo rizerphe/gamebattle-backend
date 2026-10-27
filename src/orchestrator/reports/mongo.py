@@ -4,6 +4,7 @@ Each report is one document in ``reports`` whose ``_id`` is the session id, so
 a session cannot be reported twice. Queries by game go through ``sessions``.
 """
 
+import logging
 import time
 from typing import Any
 from uuid import UUID
@@ -16,15 +17,19 @@ from orchestrator.files.mongo import MongoGameFiles
 from orchestrator.reports.models import Report, ReportReason
 from orchestrator.sessions.models import Session
 from orchestrator.sessions.mongo import MongoSessions
+from orchestrator.webhooks.notify import Notifier
+
+logger = logging.getLogger("orchestrator")
 
 # A published snapshot stays in rotation until this many reports land on it.
 REPORTS_BEFORE_UNPUBLISH = 5
 
 
 class MongoReports:
-    def __init__(self, db: AsyncDatabase) -> None:
+    def __init__(self, db: AsyncDatabase, notifier: Notifier | None = None) -> None:
         self._reports = db.reports
         self._sessions = MongoSessions(db)
+        self._notifier = notifier
 
     async def file(
         self, session: Session, short_reason: ReportReason, reason: str
@@ -42,24 +47,31 @@ class MongoReports:
         except DuplicateKeyError:
             doc = await self._reports.find_one({"_id": session.id})
             return _load(doc, session)
-        await self._unpublish_if_accumulated(session)
+        await self._after_filed(session)
         return _load(doc, session)
 
-    async def _unpublish_if_accumulated(self, session: Session) -> None:
-        """Take down a game once its current publication has enough reports."""
+    async def _after_filed(self, session: Session) -> None:
+        """Count the report against the current publication, notify, and take the game down at the limit."""
 
-        publication = await MongoGameFiles(
-            self._reports.database, session.game
-        ).published_revision()
+        files = MongoGameFiles(self._reports.database, session.game)
+        publication = await files.published_revision()
         if publication is None:
             return
         published, published_at = publication
         if published != session.game_revision:
             return
         count = await self._count_since(session.game, published, published_at)
-        if count < REPORTS_BEFORE_UNPUBLISH:
+        if count >= REPORTS_BEFORE_UNPUBLISH:
+            await files.unpublish()
+        if self._notifier is None:
             return
-        await MongoGameFiles(self._reports.database, session.game).unpublish()
+        try:
+            await self._notifier.reports_reached(session.game, count)
+            if count >= REPORTS_BEFORE_UNPUBLISH:
+                await self._notifier.game_removed(session.game, "reports", count)
+        except Exception:
+            # The report is stored and the game is down; a notification must not undo that.
+            logger.exception("could not notify webhooks")
 
     async def _count_since(self, game: UUID, revision: UUID, since: float) -> int:
         reports = await self.for_game(game)
