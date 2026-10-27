@@ -36,8 +36,14 @@ class Notifier:
         """Tell the webhooks that asked about this report: the first one, or the count reached."""
 
         hooks = await self._hooks.all()
+        every = [h for h in hooks if h.event == "every_report"]
         first = [h for h in hooks if h.event == "first_report" and count == 1]
         reached = [h for h in hooks if h.event == "threshold" and h.threshold == count]
+        if every:
+            body = await self._embed(
+                game, "Game reported", f"Report {count} on the published version.", _YELLOW, count
+            )
+            self._send(every, body)
         if first:
             body = await self._embed(
                 game, "First report", "The published version was reported for the first time.", _YELLOW, count
