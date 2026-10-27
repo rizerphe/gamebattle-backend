@@ -1,0 +1,111 @@
+import json
+import os
+from dataclasses import dataclass
+from datetime import timedelta
+
+
+@dataclass(frozen=True)
+class Settings:
+    terminal_service_url: str
+    service_token: str
+    mongo_url: str
+    mongo_database: str
+    admin_emails: frozenset[str]
+    cors_origins: tuple[str, ...]
+    firebase_credentials: dict
+    firebase_project_id: str
+    s3_endpoint: str
+    s3_region: str
+    s3_access_key: str
+    s3_secret_key: str
+    s3_avatars_bucket: str
+    avatar_cache_ttl: timedelta
+
+    @classmethod
+    def from_env(cls) -> "Settings":
+        return cls(
+            terminal_service_url=os.environ.get(
+                "TERMINAL_SERVICE_URL", "http://localhost:8080"
+            ),
+            service_token=_required("SERVICE_TOKEN"),
+            mongo_url=_required("MONGO_URL"),
+            mongo_database=os.environ.get("MONGO_DATABASE", "gamebattle"),
+            admin_emails=_admin_emails(os.environ.get("ADMIN_EMAILS", "[]")),
+            cors_origins=_cors_origins(os.environ.get("CORS_ORIGINS")),
+            firebase_credentials=_json_object("FIREBASE_CREDENTIALS"),
+            firebase_project_id=_required("FIREBASE_PROJECT_ID"),
+            s3_endpoint=_required("S3_ENDPOINT"),
+            s3_region=os.environ.get("S3_REGION", "us-east-1"),
+            s3_access_key=_required("S3_ACCESS_KEY"),
+            s3_secret_key=_required("S3_SECRET_KEY"),
+            s3_avatars_bucket=os.environ.get("S3_AVATARS_BUCKET", "avatars"),
+            avatar_cache_ttl=timedelta(
+                seconds=_positive_int(os.environ.get("AVATAR_CACHE_TTL_SECONDS"), 86_400)
+            ),
+        )
+
+
+def _required(name: str) -> str:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise ValueError(f"{name} must be set")
+    return value
+
+
+def _cors_origins(raw: str | None) -> tuple[str, ...]:
+    """Origins allowed to call the API from a browser: a JSON list or a
+    comma-separated string. Defaults to the local UI. ``*`` must be asked for."""
+
+    if raw is None or not raw.strip():
+        return ("http://localhost:3000",)
+    text = raw.strip()
+    if text.startswith("["):
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as error:
+            raise ValueError("CORS_ORIGINS must be a JSON list or comma-separated") from error
+        if not isinstance(data, list) or not all(isinstance(item, str) for item in data):
+            raise ValueError("CORS_ORIGINS must be a JSON list of strings")
+        items = data
+    else:
+        items = text.split(",")
+    origins = tuple(item.strip().rstrip("/") for item in items if item.strip())
+    if not origins:
+        raise ValueError("CORS_ORIGINS must not be empty")
+    return origins
+
+
+def _json_object(name: str) -> dict:
+    """The Firebase service-account key, passed as the JSON itself."""
+
+    try:
+        data = json.loads(_required(name))
+    except json.JSONDecodeError as error:
+        raise ValueError(f"{name} must be the service-account JSON") from error
+    if not isinstance(data, dict):
+        raise ValueError(f"{name} must be the service-account JSON")
+    return data
+
+
+def _positive_int(raw: str | None, default: int) -> int:
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw.strip())
+    except ValueError as error:
+        raise ValueError(f"expected a positive integer, got {raw!r}") from error
+    if value <= 0:
+        raise ValueError(f"expected a positive integer, got {value}")
+    return value
+
+
+def _admin_emails(raw: str) -> frozenset[str]:
+    if not raw.strip():
+        return frozenset()
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise ValueError("ADMIN_EMAILS must be a JSON list of strings") from error
+    if not isinstance(data, list) or not all(isinstance(item, str) for item in data):
+        raise ValueError("ADMIN_EMAILS must be a JSON list of strings")
+    return frozenset(data)

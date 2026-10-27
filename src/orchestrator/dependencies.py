@@ -1,0 +1,36 @@
+from typing import Annotated
+
+from fastapi import Depends, Request
+
+from orchestrator.auth import Owner
+from orchestrator.comparisons.service import Comparisons
+from orchestrator.sessions.service import Sessions
+from orchestrator.store import Player, Store
+
+
+def get_store(request: Request) -> Store:
+    return request.app.state.store
+
+
+StoreDep = Annotated[Store, Depends(get_store)]
+
+
+def get_sessions(request: Request) -> Sessions:
+    return request.app.state.sessions
+
+
+SessionsDep = Annotated[Sessions, Depends(get_sessions)]
+
+
+def get_comparisons(request: Request) -> Comparisons:
+    return request.app.state.comparisons
+
+
+ComparisonsDep = Annotated[Comparisons, Depends(get_comparisons)]
+
+
+def get_player(store: StoreDep, owner: Owner) -> Player:
+    return store.player(owner)
+
+
+PlayerDep = Annotated[Player, Depends(get_player)]

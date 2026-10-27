@@ -1,0 +1,22 @@
+[project]
+name = "gamebattle-orchestrator"
+version = "0.1.0"
+description = "Gamebattle backend (FastAPI)"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "boto3>=1.43.114",
+    "fastapi[standard]>=0.146.0",
+    "google-auth>=2.62.0",
+    "pymongo>=4.19.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.9,<0.10"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "orchestrator"
+
+[tool.fastapi]
+entrypoint = "orchestrator.main:app"
