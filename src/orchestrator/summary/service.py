@@ -69,9 +69,12 @@ class Summaries:
             return ready
         try:
             async with asyncio.timeout(self._timeout):
-                return await asyncio.shield(self._start(key, code))
+                line = await asyncio.shield(self._start(key, code))
         except TimeoutError:
             return None
+        if line is not None:
+            self._refresh(key, code)
+        return line
 
     def _start(self, key: tuple[UUID, str], code: str) -> asyncio.Task[str | None]:
         task = self._tasks.get(key)
