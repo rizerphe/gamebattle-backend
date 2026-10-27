@@ -11,6 +11,9 @@ from uuid import UUID, uuid4
 
 from orchestrator.comparisons.models import (
     Comparison,
+    ComparisonActivity,
+    ComparisonPhase,
+    ComparisonSideSession,
     ComparisonView,
     LeaderboardEntry,
 )
@@ -19,6 +22,7 @@ from orchestrator.comparisons.pairing import RatedGame, choose_opponent, choose_
 from orchestrator.reports.models import ReportReason
 from orchestrator.reports.mongo import MongoReports
 from orchestrator.sessions.models import Session
+from orchestrator.sessions.recording import enrich_sessions
 from orchestrator.sessions.service import Sessions
 from orchestrator.store import Missing, Store
 
@@ -169,6 +173,100 @@ class Comparisons:
     async def leaderboard(self) -> list[LeaderboardEntry]:
         return await self.ratings.leaderboard()
 
+    async def activity(self, player: UUID | None = None) -> list[ComparisonActivity]:
+        comparisons = await self.records.list_all()
+        if player is not None:
+            comparisons = [row for row in comparisons if row.player == player]
+        if not comparisons:
+            return []
+        session_ids = [
+            session_id
+            for comparison in comparisons
+            for side in comparison.sessions
+            for session_id in side
+        ]
+        sessions = await self.sessions.get_many(session_ids)
+        player_ids = {comparison.player for comparison in comparisons} | {
+            session.game for session in sessions.values()
+        }
+        players = await self.store.db.players.find(
+            {"_id": {"$in": list(player_ids)}}, {"email": 1, "name": 1}
+        ).to_list()
+        emails = {
+            document["_id"]: document.get("email")
+            if isinstance(document.get("email"), str)
+            else None
+            for document in players
+        }
+        names = {
+            document["_id"]: document.get("name")
+            if isinstance(document.get("name"), str)
+            else None
+            for document in players
+        }
+        enriched_sessions = {
+            session.id: session
+            for session in await enrich_sessions(self.sessions.terminals, sessions.values())
+        }
+        entries: list[ComparisonActivity] = []
+        for comparison in comparisons:
+            started_at = comparison.started_at
+            if started_at <= 0:
+                times = [
+                    sessions[session_id].started_at
+                    for side in comparison.sessions
+                    for session_id in side
+                    if session_id in sessions
+                ]
+                started_at = min(times) if times else 0.0
+            game_ids: list[UUID | None] = []
+            game_names: list[str | None] = []
+            side_sessions: list[tuple[ComparisonSideSession, ...]] = []
+            for side in comparison.sessions:
+                current = sessions.get(side[-1]) if side else None
+                if current is None:
+                    game_ids.append(None)
+                    game_names.append(None)
+                else:
+                    game_ids.append(current.game)
+                    game_names.append(names.get(current.game))
+                history: list[ComparisonSideSession] = []
+                for session_id in side:
+                    session = sessions.get(session_id)
+                    if session is None:
+                        continue
+                    enriched = enriched_sessions.get(session_id, session)
+                    history.append(
+                        ComparisonSideSession(
+                            session_id=session_id,
+                            game_id=session.game,
+                            game_name=names.get(session.game),
+                            recording_seconds=enriched.recording_seconds,
+                        )
+                    )
+                side_sessions.append(tuple(history))
+            sides_ready = tuple(
+                _side_ready(side, sessions, comparison.exited)
+                for side in comparison.sessions
+            )
+            entries.append(
+                ComparisonActivity(
+                    id=comparison.id,
+                    player=comparison.player,
+                    sessions=comparison.sessions,
+                    rating=comparison.rating,
+                    started_at=started_at,
+                    voter_email=emails.get(comparison.player),
+                    game_ids=(game_ids[0], game_ids[1]),
+                    game_names=(game_names[0], game_names[1]),
+                    phase=_activity_phase(comparison, sessions),
+                    sides_ready=(sides_ready[0], sides_ready[1]),
+                    side_sessions=(side_sessions[0], side_sessions[1]),
+                )
+            )
+        entries.sort(key=lambda entry: (-entry.started_at, entry.id))
+        return entries
+
     async def observe(self, comparison: Comparison) -> Comparison:
         fresh = []
         for side in comparison.sessions:
@@ -227,6 +325,20 @@ class Comparisons:
 
 class OwnGame(Exception):
     pass
+
+
+def _activity_phase(
+    comparison: Comparison, sessions: dict[UUID, Session]
+) -> ComparisonPhase:
+    if comparison.rating is not None:
+        return "rated"
+    if comparison.abandoned:
+        return "abandoned"
+    if all(
+        _side_ready(side, sessions, comparison.exited) for side in comparison.sessions
+    ):
+        return "awaiting_rating"
+    return "running"
 
 
 def _side_ready(

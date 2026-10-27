@@ -10,12 +10,13 @@ from dataclasses import dataclass
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Path, Response
+from fastapi import APIRouter, HTTPException, Path, Query, Response
 
 from orchestrator.access import CompareRequired, LeaderboardRequired
-from orchestrator.auth import CallerDep, Owner
+from orchestrator.auth import AdminRequired, CallerDep, Owner
 from orchestrator.comparisons.models import (
     Comparison,
+    ComparisonActivity,
     ComparisonView,
     LeaderboardEntry,
 )
@@ -57,6 +58,15 @@ async def read_leaderboard(
 ) -> list[LeaderboardEntry]:
     # Public while the phase shows it: the leaderboard page works signed out.
     return await comparisons.leaderboard()
+
+
+@router.get("/comparisons")
+async def list_comparisons(
+    comparisons: ComparisonsDep,
+    _admin: AdminRequired,
+    player: UUID | None = Query(default=None),
+) -> list[ComparisonActivity]:
+    return await comparisons.activity(player=player)
 
 
 @router.post("/comparisons", status_code=201)

@@ -7,9 +7,10 @@ stays unset until both current games have genuinely exited at least once.
 """
 
 from dataclasses import dataclass, field
+from typing import Literal
 from uuid import UUID
 
-
+ComparisonPhase = Literal["running", "awaiting_rating", "rated", "abandoned"]
 
 
 @dataclass(frozen=True)
@@ -40,3 +41,30 @@ class LeaderboardEntry:
     game_id: UUID
     name: str | None
     score: float
+
+
+@dataclass(frozen=True)
+class ComparisonSideSession:
+    session_id: UUID
+    game_id: UUID
+    game_name: str | None
+    recording_seconds: float = 0.0
+
+
+@dataclass(frozen=True)
+class ComparisonActivity:
+    """Admin activity feed: a comparison plus display fields."""
+
+    id: UUID
+    player: UUID
+    sessions: tuple[tuple[UUID, ...], tuple[UUID, ...]]
+    rating: float | None
+    started_at: float
+    voter_email: str | None
+    game_ids: tuple[UUID | None, UUID | None]
+    game_names: tuple[str | None, str | None]
+    phase: ComparisonPhase
+    sides_ready: tuple[bool, bool]
+    side_sessions: tuple[
+        tuple[ComparisonSideSession, ...], tuple[ComparisonSideSession, ...]
+    ]

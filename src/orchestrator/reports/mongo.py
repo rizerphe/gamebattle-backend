@@ -79,6 +79,12 @@ class MongoReports:
         docs = await cursor.sort("timestamp", ASCENDING).to_list()
         return [_load(doc, sessions[doc["_id"]]) for doc in docs]
 
+    async def filed_by(self, player: UUID) -> list[Report]:
+        sessions = {s.id: s for s in await self._sessions.for_player(player)}
+        cursor = self._reports.find({"_id": {"$in": list(sessions)}})
+        docs = await cursor.sort("timestamp", ASCENDING).to_list()
+        return [_load(doc, sessions[doc["_id"]]) for doc in docs]
+
     async def all(self) -> list[Report]:
         docs = await self._reports.find().sort("timestamp", ASCENDING).to_list()
         sessions = await self._sessions.get_many(doc["_id"] for doc in docs)

@@ -8,7 +8,7 @@ through ``/sessions``.
 from dataclasses import dataclass
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from orchestrator.auth import AdminRequired, CallerDep, Owner
 from orchestrator.dependencies import SessionsDep, StoreDep
@@ -63,6 +63,22 @@ async def read_report(
     if report is None:
         raise HTTPException(404, "report not found")
     return await enrich_report(sessions, report)
+
+
+@router.get("/reports")
+async def all_reports(
+    store: StoreDep,
+    sessions: SessionsDep,
+    _admin: AdminRequired,
+    player: UUID | None = Query(default=None),
+) -> list[Report]:
+    reports_store = MongoReports(store.db)
+    reports = (
+        await reports_store.filed_by(player)
+        if player is not None
+        else await reports_store.all()
+    )
+    return await enrich_reports(sessions, reports)
 
 
 @router.get("/games/{game_id}/reports")
