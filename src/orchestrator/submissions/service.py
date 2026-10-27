@@ -245,7 +245,8 @@ async def admin_students(
 
     comparisons_made: dict[UUID, int] = defaultdict(int)
     for comparison in comparisons:
-        comparisons_made[comparison.player] += 1
+        if comparison.rating is not None:
+            comparisons_made[comparison.player] += 1
 
     reports_filed: dict[UUID, int] = defaultdict(int)
     reports_received: dict[UUID, int] = defaultdict(int)

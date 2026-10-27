@@ -60,7 +60,7 @@ class Comparisons:
         existing = await self.records.open_for(player.id)
         if existing is not None:
             return await self.observe(existing), False
-        candidates = await self._candidates(player.id, exclude=set())
+        candidates = await self._candidates(player.id, exclude=set(), minimum=2)
         if len(candidates) < 2:
             raise Unavailable("no games to compare")
         left, right = choose_pair(candidates, self.rng)
@@ -313,9 +313,20 @@ class Comparisons:
             raise Missing(comparison_id)
         return comparison
 
-    async def _candidates(self, player: UUID, exclude: set[UUID]) -> list[RatedGame]:
-        assigned = await self.records.assigned_games(player)
-        blocked = assigned | exclude | {player}
+    async def _candidates(
+        self, player: UUID, exclude: set[UUID], *, minimum: int
+    ) -> list[RatedGame]:
+        """Unseen games, or every game once the player has seen too many to fill ``minimum``."""
+
+        unseen = await self._pool(player, exclude, await self.records.assigned_games(player))
+        if len(unseen) >= minimum:
+            return unseen
+        return await self._pool(player, exclude, set())
+
+    async def _pool(
+        self, player: UUID, exclude: set[UUID], seen: set[UUID]
+    ) -> list[RatedGame]:
+        blocked = seen | exclude | {player}
         chosen = []
         for game_id, _snapshot in await self.store.published_games():
             if game_id in blocked:
@@ -326,7 +337,7 @@ class Comparisons:
 
     async def _replacement(self, player: UUID, other: UUID, reported: UUID) -> RatedGame:
         elo, plays = await self.ratings.get(other)
-        candidates = await self._candidates(player, exclude={other, reported})
+        candidates = await self._candidates(player, exclude={other, reported}, minimum=1)
         if not candidates:
             raise Unavailable("no replacement game")
         return choose_opponent(RatedGame(other, elo, plays), candidates, self.rng)
