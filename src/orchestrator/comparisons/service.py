@@ -16,6 +16,7 @@ from orchestrator.comparisons.models import (
     ComparisonSideSession,
     ComparisonView,
     LeaderboardEntry,
+    RankedGame,
 )
 from orchestrator.comparisons.mongo import MongoComparisons, MongoRatings
 from orchestrator.comparisons.pairing import RatedGame, choose_opponent, choose_pair
@@ -170,8 +171,23 @@ class Comparisons:
 
         await self.records.abandon_open()
 
-    async def leaderboard(self) -> list[LeaderboardEntry]:
-        return await self.ratings.leaderboard()
+    async def ranking(self) -> list[RankedGame]:
+        """Every rated game, best first. Ids stay server-side."""
+
+        return await self.ratings.ranking()
+
+    async def leaderboard(self, viewer: UUID | None) -> list[LeaderboardEntry]:
+        """The public view: no ids, with the viewer's own game flagged."""
+
+        return [
+            LeaderboardEntry(
+                name=game.name,
+                score=game.score,
+                times_played=game.plays,
+                own=game.game_id == viewer,
+            )
+            for game in await self.ranking()
+        ]
 
     async def activity(self, player: UUID | None = None) -> list[ComparisonActivity]:
         comparisons = await self.records.list_all()

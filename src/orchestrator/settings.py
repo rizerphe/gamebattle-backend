@@ -22,6 +22,7 @@ class Settings:
     s3_secret_key: str
     s3_avatars_bucket: str
     avatar_cache_ttl: timedelta
+    required_comparisons: int
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -46,6 +47,7 @@ class Settings:
             avatar_cache_ttl=timedelta(
                 seconds=_positive_int(os.environ.get("AVATAR_CACHE_TTL_SECONDS"), 86_400)
             ),
+            required_comparisons=_positive_int(os.environ.get("REQUIRED_COMPARISONS"), 10),
         )
 
 

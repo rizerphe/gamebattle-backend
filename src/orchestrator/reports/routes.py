@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Query
 from orchestrator.auth import AdminRequired, CallerDep, Owner
 from orchestrator.dependencies import SessionsDep, StoreDep
 from orchestrator.reports.enrich import enrich_report, enrich_reports
-from orchestrator.reports.models import Report, ReportReason
+from orchestrator.reports.models import FiledReport, Report, ReportReason
 from orchestrator.reports.mongo import MongoReports
 from orchestrator.sessions.models import Session
 from orchestrator.sessions.service import Sessions
@@ -34,7 +34,7 @@ class FileReport:
 @router.put("/sessions/{session_id}/report")
 async def file_report(
     session_id: UUID, body: FileReport, store: StoreDep, sessions: SessionsDep, owner: Owner
-) -> Report:
+) -> FiledReport:
     session = await _session(sessions, owner, session_id)
     if session.game == session.player:
         raise HTTPException(403, "you cannot report your own game")
@@ -47,7 +47,7 @@ async def file_report(
     except TerminalError as error:
         status = error.status if error.status in (400, 404, 503) else 502
         raise HTTPException(status, error.message) from error
-    return await enrich_report(sessions, report)
+    return FiledReport(report.short_reason, report.reason, report.timestamp)
 
 
 @router.get("/sessions/{session_id}/report")

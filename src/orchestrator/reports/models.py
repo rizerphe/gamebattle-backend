@@ -23,6 +23,15 @@ class ReportReason(StrEnum):
 
 
 @dataclass(frozen=True)
+class FiledReport:
+    """What the reporter gets back. The session names the author's game, so it is left out."""
+
+    short_reason: ReportReason
+    reason: str
+    timestamp: float
+
+
+@dataclass(frozen=True)
 class Report:
     session: Session
     short_reason: ReportReason

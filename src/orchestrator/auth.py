@@ -54,6 +54,21 @@ def identify_caller(
     return Caller(owner, admin, allowed)
 
 
+def identify_optional_caller(
+    request: Request, authorization: Annotated[str | None, Header()] = None
+) -> Caller | None:
+    """For public routes that can tell a signed-in viewer from a stranger.
+
+    No header means a stranger. A bad token is still refused, and a caller the
+    access list rejects is treated as a stranger.
+    """
+
+    if not authorization:
+        return None
+    caller = identify_caller(request, authorization)
+    return caller if caller.allowed else None
+
+
 def get_caller(caller: Annotated[Caller, Depends(identify_caller)]) -> Caller:
     if not caller.allowed:
         raise HTTPException(403, ACCESS_DENIED)
@@ -96,4 +111,5 @@ def _is_admin(claims: dict, owner: str, emails: frozenset[str]) -> bool:
     return isinstance(email, str) and email in emails and claims.get("email_verified") is True
 
 
+OptionalCaller = Annotated[Caller | None, Depends(identify_optional_caller)]
 IdentifiedDep = Annotated[Caller, Depends(identify_caller)]

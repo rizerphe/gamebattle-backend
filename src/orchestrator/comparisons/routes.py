@@ -13,7 +13,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Path, Query, Response
 
 from orchestrator.access import CompareRequired, LeaderboardRequired
-from orchestrator.auth import AdminRequired, CallerDep, Owner
+from orchestrator.auth import AdminRequired, CallerDep, OptionalCaller, Owner
 from orchestrator.comparisons.models import (
     Comparison,
     ComparisonActivity,
@@ -27,7 +27,7 @@ from orchestrator.comparisons.service import (
     Unavailable,
     Unfinished,
 )
-from orchestrator.dependencies import ComparisonsDep
+from orchestrator.dependencies import ComparisonsDep, StoreDep
 from orchestrator.files.models import NoEntrypoint
 from orchestrator.reports.models import ReportReason
 from orchestrator.sessions.service import TooManySessions
@@ -54,10 +54,15 @@ class Rate:
 
 @router.get("/leaderboard")
 async def read_leaderboard(
-    comparisons: ComparisonsDep, _open: LeaderboardRequired
+    comparisons: ComparisonsDep,
+    store: StoreDep,
+    caller: OptionalCaller,
+    _open: LeaderboardRequired,
 ) -> list[LeaderboardEntry]:
     # Public while the phase shows it: the leaderboard page works signed out.
-    return await comparisons.leaderboard()
+    # Entries carry no ids; a signed-in viewer only learns which one is theirs.
+    viewer = store.player(caller.owner).id if caller else None
+    return await comparisons.leaderboard(viewer)
 
 
 @router.get("/comparisons")

@@ -37,10 +37,23 @@ class ComparisonView:
 
 
 @dataclass(frozen=True)
-class LeaderboardEntry:
+class RankedGame:
+    """Server-side only: the game id never reaches a player."""
+
     game_id: UUID
     name: str | None
     score: float
+    plays: int
+
+
+@dataclass(frozen=True)
+class LeaderboardEntry:
+    """What the leaderboard shows. ``own`` marks the viewer's game; there is no id."""
+
+    name: str | None
+    score: float
+    times_played: int
+    own: bool
 
 
 @dataclass(frozen=True)

@@ -28,6 +28,8 @@ from orchestrator.sessions.routes import router as sessions_router
 from orchestrator.sessions.service import Sessions
 from orchestrator.summary.routes import router as summary_router
 from orchestrator.settings import Settings
+from orchestrator.stats.routes import router as stats_router
+from orchestrator.stats.service import StatsService
 from orchestrator.store import Store
 from orchestrator.submissions.firebase import FirebaseUsers
 from orchestrator.submissions.routes import router as submissions_router
@@ -80,6 +82,7 @@ def create_app() -> FastAPI:
                 TerminalClient(http, config.terminal_service_url, config.service_token),
             )
             app.state.comparisons = Comparisons(store, app.state.sessions)
+            app.state.stats = StatsService(db, app.state.comparisons)
             app.state.users = FirebaseUsers(
                 config.firebase_credentials, config.firebase_project_id, http
             )
@@ -111,6 +114,7 @@ def create_app() -> FastAPI:
     app.include_router(players_router)
     app.include_router(reports_router)
     app.include_router(sessions_router)
+    app.include_router(stats_router)
     app.include_router(submissions_router)
     app.include_router(summary_router)
     return app

@@ -15,7 +15,14 @@ from orchestrator.phases.models import allows_session, can_edit
 from orchestrator.auth import AdminRequired, CallerDep, Owner
 from orchestrator.dependencies import SessionsDep
 from orchestrator.files.models import NoEntrypoint
-from orchestrator.sessions.models import RecordingChunk, Session, TerminalEvent, Ticket
+from orchestrator.sessions.models import (
+    PlayerSession,
+    RecordingChunk,
+    Session,
+    TerminalEvent,
+    Ticket,
+    for_viewer,
+)
 from orchestrator.sessions.recording import enrich_session
 from orchestrator.sessions.service import PastSnapshot, Sessions, TooManySessions
 from orchestrator.store import Missing
@@ -35,14 +42,15 @@ async def create_session(
     sessions: SessionsDep,
     caller: CallerDep,
     state: PhaseDep,
-) -> Session:
+) -> Session | PlayerSession:
     """Run the caller's own latest snapshot. Admins may run while editing is closed."""
 
     if not (can_edit(state.phase) or caller.admin):
         raise HTTPException(403, "editing is closed")
     try:
         created = await sessions.create(caller.owner, body.game)
-        return await enrich_session(sessions.terminals, created)
+        enriched = await enrich_session(sessions.terminals, created)
+        return for_viewer(enriched, admin=caller.admin)
     except Missing as error:
         raise HTTPException(404, "snapshot not found") from error
     except PastSnapshot as error:
@@ -56,24 +64,29 @@ async def create_session(
 
 
 @router.get("/{session_id}")
-async def read_session(session_id: UUID, sessions: SessionsDep, caller: CallerDep) -> Session:
+async def read_session(
+    session_id: UUID, sessions: SessionsDep, caller: CallerDep
+) -> Session | PlayerSession:
     session = await _owned(sessions, caller.owner, session_id, any_player=caller.admin)
-    return await enrich_session(sessions.terminals, session)
+    enriched = await enrich_session(sessions.terminals, session)
+    return for_viewer(enriched, admin=caller.admin)
 
 
 @router.post("/{session_id}/restart", status_code=201)
 async def restart_session(
-    session_id: UUID, sessions: SessionsDep, owner: Owner, state: PhaseDep
-) -> Session:
+    session_id: UUID, sessions: SessionsDep, caller: CallerDep, state: PhaseDep
+) -> Session | PlayerSession:
     """Launch the same snapshot again. The caller follows the new session."""
 
+    owner = caller.owner
     previous = await _owned(sessions, owner, session_id)
     if not allows_session(previous.kind, state.phase):
         raise HTTPException(403, "this phase does not allow that")
     try:
         launched = await sessions.relaunch(owner, previous)
         await sessions.stop(previous.id, "restarted")
-        return await enrich_session(sessions.terminals, launched)
+        enriched = await enrich_session(sessions.terminals, launched)
+        return for_viewer(enriched, admin=caller.admin)
     except Missing as error:
         raise HTTPException(404, "snapshot not found") from error
     except TooManySessions as error:

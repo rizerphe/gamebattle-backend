@@ -11,7 +11,7 @@ from uuid import UUID
 from pymongo import ASCENDING, DESCENDING
 from pymongo.asynchronous.database import AsyncDatabase
 
-from orchestrator.comparisons.models import Comparison, LeaderboardEntry
+from orchestrator.comparisons.models import Comparison, RankedGame
 from orchestrator.comparisons.pairing import INITIAL_ELO, updated_elos
 from orchestrator.sessions.mongo import MongoSessions
 
@@ -46,6 +46,13 @@ class MongoComparisons:
     async def abandon_open(self) -> None:
         await self._comparisons.update_many(
             {"rating": None, "abandoned": {"$ne": True}}, {"$set": {"abandoned": True}}
+        )
+
+    async def rated_by(self, player: UUID) -> int:
+        """How many comparisons this player has rated."""
+
+        return await self._comparisons.count_documents(
+            {"player": player, "rating": {"$ne": None}}
         )
 
     async def assigned_games(self, player: UUID) -> set[UUID]:
@@ -116,7 +123,7 @@ class MongoRatings:
             upsert=True,
         )
 
-    async def leaderboard(self) -> list[LeaderboardEntry]:
+    async def ranking(self) -> list[RankedGame]:
         rows = await self._ratings.find({"plays": {"$gt": 0}}).to_list()
         if not rows:
             return []
@@ -128,10 +135,11 @@ class MongoRatings:
             for document in players
         }
         entries = [
-            LeaderboardEntry(
+            RankedGame(
                 game_id=row["_id"],
                 name=names.get(row["_id"]),
                 score=float(row["elo"]),
+                plays=int(row["plays"]),
             )
             for row in rows
         ]

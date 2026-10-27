@@ -27,6 +27,25 @@ class Session:
 
 
 @dataclass(frozen=True)
+class PlayerSession:
+    """A session as its player sees it.
+
+    A comparison session names someone else's game, and a game's id is its
+    author's id, so neither ``game``, ``game_revision`` nor ``player`` is shown.
+    """
+
+    id: UUID
+    started_at: float
+    recording_seconds: float = 0.0
+
+
+def for_viewer(session: Session, *, admin: bool) -> Session | PlayerSession:
+    if admin:
+        return session
+    return PlayerSession(session.id, session.started_at, session.recording_seconds)
+
+
+@dataclass(frozen=True)
 class Ticket:
     ticket: str
     expires_at: float
