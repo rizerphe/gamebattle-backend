@@ -66,9 +66,9 @@ class MongoReports:
         if self._notifier is None:
             return
         try:
-            await self._notifier.reports_reached(session.game, count)
+            await self._notifier.report_filed(session.game, count)
             if count >= REPORTS_BEFORE_UNPUBLISH:
-                await self._notifier.game_removed(session.game, "reports", count)
+                await self._notifier.game_removed(session.game, count)
         except Exception:
             # The report is stored and the game is down; a notification must not undo that.
             logger.exception("could not notify webhooks")

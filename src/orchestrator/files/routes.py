@@ -4,7 +4,6 @@ A player reads and writes only their own latest snapshot, at ``/files``. Admins
 reach any game through ``/games/{game_id}/...`` and any snapshot by id.
 """
 
-import logging
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -13,7 +12,7 @@ from fastapi.responses import Response
 
 from orchestrator.access import EditRequired
 from orchestrator.auth import AdminRequired
-from orchestrator.dependencies import NotifierDep, PlayerDep, StoreDep
+from orchestrator.dependencies import PlayerDep, StoreDep
 from orchestrator.files.models import (
     DirtySnapshot,
     GameFile,
@@ -23,10 +22,8 @@ from orchestrator.files.models import (
     TooManyFiles,
     valid_path,
 )
-from orchestrator.files.mongo import MongoGameFiles
 from orchestrator.store import Missing, Store
 
-logger = logging.getLogger("orchestrator")
 router = APIRouter()
 
 MAX_FILE_BYTES = 1024 * 1024
@@ -114,17 +111,9 @@ async def publish(
 
 
 @router.delete("/games/{game_id}/publish", status_code=204)
-async def unpublish(
-    game_id: UUID, store: StoreDep, notifier: NotifierDep, _admin: AdminRequired
-) -> Response:
+async def unpublish(game_id: UUID, store: StoreDep, _admin: AdminRequired) -> Response:
     files = await _game_files(store, game_id)
-    was_published = await MongoGameFiles(store.db, game_id).published_revision() is not None
     await files.unpublish()
-    if was_published:
-        try:
-            await notifier.game_removed(game_id, "admin", 0)
-        except Exception:
-            logger.exception("could not notify webhooks")
     return Response(status_code=204)
 
 

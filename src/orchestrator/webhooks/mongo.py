@@ -23,12 +23,13 @@ class MongoWebhooks:
         return _load(doc) if doc else None
 
     async def create(
-        self, url: str, thresholds: tuple[int, ...], on_removed: bool
+        self, url: str, on_first_report: bool, threshold: int | None, on_removed: bool
     ) -> Webhook:
         doc = {
             "_id": uuid4(),
             "url": url,
-            "thresholds": list(thresholds),
+            "on_first_report": on_first_report,
+            "threshold": threshold,
             "on_removed": on_removed,
             "created_at": time.time(),
         }
@@ -36,11 +37,23 @@ class MongoWebhooks:
         return _load(doc)
 
     async def replace(
-        self, webhook_id: UUID, url: str, thresholds: tuple[int, ...], on_removed: bool
+        self,
+        webhook_id: UUID,
+        url: str,
+        on_first_report: bool,
+        threshold: int | None,
+        on_removed: bool,
     ) -> Webhook | None:
         doc = await self._webhooks.find_one_and_update(
             {"_id": webhook_id},
-            {"$set": {"url": url, "thresholds": list(thresholds), "on_removed": on_removed}},
+            {
+                "$set": {
+                    "url": url,
+                    "on_first_report": on_first_report,
+                    "threshold": threshold,
+                    "on_removed": on_removed,
+                }
+            },
             return_document=True,
         )
         return _load(doc) if doc else None
@@ -54,7 +67,8 @@ def _load(doc: dict[str, Any]) -> Webhook:
     return Webhook(
         id=doc["_id"],
         url=doc["url"],
-        thresholds=tuple(sorted(doc["thresholds"])),
-        on_removed=doc["on_removed"],
+        on_first_report=doc.get("on_first_report", False),
+        threshold=doc.get("threshold"),
+        on_removed=doc.get("on_removed", False),
         created_at=doc["created_at"],
     )

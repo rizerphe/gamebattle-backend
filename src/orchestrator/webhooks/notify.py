@@ -10,7 +10,6 @@ admin report page; it never carries the report text or any recording.
 import asyncio
 import logging
 from collections.abc import Awaitable
-from typing import Literal
 from uuid import UUID
 
 import httpx
@@ -20,8 +19,6 @@ from orchestrator.webhooks.models import Webhook
 from orchestrator.webhooks.mongo import MongoWebhooks
 
 logger = logging.getLogger("orchestrator.webhooks")
-
-Cause = Literal["reports", "admin"]
 
 _TIMEOUT = 10.0
 _GREEN, _YELLOW, _RED = 0x57F287, 0xFEE75C, 0xED4245
@@ -35,32 +32,35 @@ class Notifier:
         self._hooks = MongoWebhooks(store.db)
         self._tasks: set[asyncio.Task[None]] = set()
 
-    async def reports_reached(self, game: UUID, count: int) -> None:
-        """Tell every webhook with ``count`` among its thresholds."""
+    async def report_filed(self, game: UUID, count: int) -> None:
+        """Tell the webhooks that asked about this report: the first one, or the count reached.
 
-        hooks = [hook for hook in await self._hooks.all() if count in hook.thresholds]
-        if not hooks:
-            return
-        body = await self._embed(
-            game,
-            title="Game reported",
-            description=f"{count} report{'s' if count != 1 else ''} on the published version.",
-            color=_YELLOW,
-            count=count,
-        )
-        self._send(hooks, body)
+        A webhook that matches both on a first report is told once.
+        """
 
-    async def game_removed(self, game: UUID, cause: Cause, count: int) -> None:
-        """Tell every webhook that asked about removed games."""
+        hooks = await self._hooks.all()
+        first = [hook for hook in hooks if count == 1 and hook.on_first_report]
+        reached = [
+            hook for hook in hooks if hook.threshold == count and hook not in first
+        ]
+        if first:
+            body = await self._embed(
+                game, "First report", "The published version was reported for the first time.", _YELLOW, count
+            )
+            self._send(first, body)
+        if reached:
+            body = await self._embed(
+                game, f"{count} reports reached", f"{count} reports on the published version.", _YELLOW, count
+            )
+            self._send(reached, body)
+
+    async def game_removed(self, game: UUID, count: int) -> None:
+        """Tell every webhook that asked about games taken down by reports."""
 
         hooks = [hook for hook in await self._hooks.all() if hook.on_removed]
         if not hooks:
             return
-        description = (
-            f"Taken down automatically after {count} reports."
-            if cause == "reports"
-            else "Unpublished by an admin."
-        )
+        description = f"Taken down automatically after {count} reports."
         self._send(hooks, await self._embed(game, "Game removed", description, _RED, count))
 
     async def test(self, hook: Webhook) -> None:

@@ -1,8 +1,9 @@
 """Webhooks admins register to hear about reports and removed games.
 
-A webhook is a URL that accepts a Discord-style JSON body. It fires when a
-game's report count on its current publication reaches one of ``thresholds``,
-and, if ``on_removed`` is set, when a game stops being published.
+A webhook is a URL that accepts a Discord-style JSON body. Each of its three
+triggers is independent: the first report on a game's published version, the
+report count reaching ``threshold`` (unset when off), and the game being taken
+down automatically by reports.
 """
 
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ from uuid import UUID
 class Webhook:
     id: UUID
     url: str
-    thresholds: tuple[int, ...]
+    on_first_report: bool
+    threshold: int | None
     on_removed: bool
     created_at: float

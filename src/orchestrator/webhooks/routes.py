@@ -1,6 +1,6 @@
 """Webhooks over HTTP. Admins only."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -22,7 +22,8 @@ _MAX_URL_LENGTH = 2000
 @dataclass(frozen=True)
 class WebhookBody:
     url: str
-    thresholds: list[int] = field(default_factory=list)
+    on_first_report: bool = False
+    threshold: int | None = None
     on_removed: bool = False
 
 
@@ -33,16 +34,20 @@ async def list_webhooks(store: StoreDep, _admin: AdminRequired) -> list[Webhook]
 
 @router.post("/webhooks")
 async def create_webhook(body: WebhookBody, store: StoreDep, _admin: AdminRequired) -> Webhook:
-    url, thresholds = _checked(body)
-    return await MongoWebhooks(store.db).create(url, thresholds, body.on_removed)
+    url = _checked(body)
+    return await MongoWebhooks(store.db).create(
+        url, body.on_first_report, body.threshold, body.on_removed
+    )
 
 
 @router.put("/webhooks/{webhook_id}")
 async def replace_webhook(
     webhook_id: UUID, body: WebhookBody, store: StoreDep, _admin: AdminRequired
 ) -> Webhook:
-    url, thresholds = _checked(body)
-    hook = await MongoWebhooks(store.db).replace(webhook_id, url, thresholds, body.on_removed)
+    url = _checked(body)
+    hook = await MongoWebhooks(store.db).replace(
+        webhook_id, url, body.on_first_report, body.threshold, body.on_removed
+    )
     if hook is None:
         raise HTTPException(404, "webhook not found")
     return hook
@@ -71,14 +76,13 @@ async def test_webhook(
     return Response(status_code=204)
 
 
-def _checked(body: WebhookBody) -> tuple[str, tuple[int, ...]]:
+def _checked(body: WebhookBody) -> str:
     url = body.url.strip()
     parsed = urlparse(url)
     if len(url) > _MAX_URL_LENGTH or parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise HTTPException(400, "invalid webhook url")
-    if any(not 1 <= count <= REPORTS_BEFORE_UNPUBLISH for count in body.thresholds):
+    if body.threshold is not None and not 1 <= body.threshold <= REPORTS_BEFORE_UNPUBLISH:
         raise HTTPException(400, "invalid report threshold")
-    thresholds = tuple(sorted(set(body.thresholds)))
-    if not thresholds and not body.on_removed:
-        raise HTTPException(400, "webhook needs a threshold or removal notifications")
-    return url, thresholds
+    if not (body.on_first_report or body.on_removed or body.threshold is not None):
+        raise HTTPException(400, "webhook needs at least one notification")
+    return url
