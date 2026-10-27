@@ -67,6 +67,7 @@ class AdminStudent:
     comparisons_made: int
     reports_filed: int
     reports_received: int
+    admin: bool = False
 
 
 class MissingStudent(Exception):
@@ -234,7 +235,9 @@ async def lookup_students(
     return [rows[student_id] for student_id in wanted if student_id in rows]
 
 
-async def admin_students(store: Store, users: UserDirectory) -> list[AdminStudent]:
+async def admin_students(
+    store: Store, users: UserDirectory, admin_emails: frozenset[str] = frozenset()
+) -> list[AdminStudent]:
     games = await store.list_games()
     comparisons = await MongoComparisons(store.db).list_all()
     reports = await MongoReports(store.db).all()
@@ -280,6 +283,7 @@ async def admin_students(store: Store, users: UserDirectory) -> list[AdminStuden
                 comparisons_made=comparisons_made[game.id],
                 reports_filed=reports_filed[game.id],
                 reports_received=reports_received[game.id],
+                admin=bool(profile and profile.email in admin_emails),
             )
         )
 

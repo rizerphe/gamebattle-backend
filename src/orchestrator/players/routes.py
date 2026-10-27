@@ -5,7 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter
 
-from orchestrator.auth import CallerDep
+from orchestrator.auth import IdentifiedDep
 from orchestrator.dependencies import StoreDep
 
 router = APIRouter()
@@ -15,13 +15,15 @@ router = APIRouter()
 class PlayerInfo:
     id: UUID
     admin: bool
+    allowed: bool
 
 
 @router.get("/player")
-async def read_player(store: StoreDep, caller: CallerDep) -> PlayerInfo:
+async def read_player(store: StoreDep, caller: IdentifiedDep) -> PlayerInfo:
     player = store.player(caller.owner)
-    await _link_account(store, player.id, caller.owner)
-    return PlayerInfo(id=player.id, admin=caller.admin)
+    if caller.allowed:
+        await _link_account(store, player.id, caller.owner)
+    return PlayerInfo(id=player.id, admin=caller.admin, allowed=caller.allowed)
 
 
 async def _link_account(store: StoreDep, player_id: UUID, uid: str) -> None:

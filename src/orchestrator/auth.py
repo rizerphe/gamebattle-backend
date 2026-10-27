@@ -5,10 +5,13 @@ audience and issuer are checked before any claim is read; see ``tokens.py``.
 The owner is the token's ``sub``, the Firebase account id. A caller is an admin
 when the signed ``admin`` claim is boolean true, when their verified email is
 listed in ``ADMIN_EMAILS``, or when the owner string itself is listed there.
-Without a valid token the answer is 401.
+Without a valid token the answer is 401. When ``ACCESS_LIST`` is set, a caller
+whose verified email matches none of its regexes (and who is not an admin) gets
+403 from every route except ``/player``, which reports ``allowed: false``.
 """
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Annotated
 
@@ -23,9 +26,13 @@ logger = logging.getLogger("orchestrator.auth")
 class Caller:
     owner: str
     admin: bool
+    allowed: bool = True
 
 
-def get_caller(
+ACCESS_DENIED = "you do not have access to this service"
+
+
+def identify_caller(
     request: Request, authorization: Annotated[str | None, Header()] = None
 ) -> Caller:
     if not authorization:
@@ -41,7 +48,16 @@ def get_caller(
         logger.error("could not verify a token: %s", error)
         raise HTTPException(503, "authentication is unavailable") from error
     owner = claims["sub"]
-    return Caller(owner, _is_admin(claims, owner, request.app.state.settings.admin_emails))
+    settings = request.app.state.settings
+    admin = _is_admin(claims, owner, settings.admin_emails)
+    allowed = admin or _is_allowed(claims, settings.access_list)
+    return Caller(owner, admin, allowed)
+
+
+def get_caller(caller: Annotated[Caller, Depends(identify_caller)]) -> Caller:
+    if not caller.allowed:
+        raise HTTPException(403, ACCESS_DENIED)
+    return caller
 
 
 def get_owner(caller: Annotated[Caller, Depends(get_caller)]) -> str:
@@ -60,6 +76,15 @@ def require_admin(caller: CallerDep) -> None:
 AdminRequired = Annotated[None, Depends(require_admin)]
 
 
+def _is_allowed(claims: dict, access_list: tuple[re.Pattern[str], ...] | None) -> bool:
+    if access_list is None:
+        return True
+    email = claims.get("email")
+    if not isinstance(email, str) or claims.get("email_verified") is not True:
+        return False
+    return any(pattern.fullmatch(email) for pattern in access_list)
+
+
 def _is_admin(claims: dict, owner: str, emails: frozenset[str]) -> bool:
     """A signed token's email counts only when Firebase marks it verified."""
 
@@ -69,3 +94,6 @@ def _is_admin(claims: dict, owner: str, emails: frozenset[str]) -> bool:
         return True
     email = claims.get("email")
     return isinstance(email, str) and email in emails and claims.get("email_verified") is True
+
+
+IdentifiedDep = Annotated[Caller, Depends(identify_caller)]

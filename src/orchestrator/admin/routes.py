@@ -21,7 +21,9 @@ async def list_admin_students(
     _admin: AdminRequired,
 ) -> list[AdminStudent]:
     try:
-        rows = await admin_students(store, get_users(request))
+        rows = await admin_students(
+            store, get_users(request), request.app.state.settings.admin_emails
+        )
     except FirebaseUnavailable as error:
         raise HTTPException(502, "could not reach firebase") from error
     return [

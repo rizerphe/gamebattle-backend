@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from dataclasses import dataclass
 from datetime import timedelta
 
@@ -11,6 +12,7 @@ class Settings:
     mongo_url: str
     mongo_database: str
     admin_emails: frozenset[str]
+    access_list: tuple[re.Pattern[str], ...] | None
     cors_origins: tuple[str, ...]
     firebase_credentials: dict
     firebase_project_id: str
@@ -23,6 +25,7 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
+        admin_emails = _admin_emails(os.environ.get("ADMIN_EMAILS", "[]"))
         return cls(
             terminal_service_url=os.environ.get(
                 "TERMINAL_SERVICE_URL", "http://localhost:8080"
@@ -30,7 +33,8 @@ class Settings:
             service_token=_required("SERVICE_TOKEN"),
             mongo_url=_required("MONGO_URL"),
             mongo_database=os.environ.get("MONGO_DATABASE", "gamebattle"),
-            admin_emails=_admin_emails(os.environ.get("ADMIN_EMAILS", "[]")),
+            admin_emails=admin_emails,
+            access_list=_access_list(os.environ.get("ACCESS_LIST"), admin_emails),
             cors_origins=_cors_origins(os.environ.get("CORS_ORIGINS")),
             firebase_credentials=_json_object("FIREBASE_CREDENTIALS"),
             firebase_project_id=_required("FIREBASE_PROJECT_ID"),
@@ -109,3 +113,28 @@ def _admin_emails(raw: str) -> frozenset[str]:
     if not isinstance(data, list) or not all(isinstance(item, str) for item in data):
         raise ValueError("ADMIN_EMAILS must be a JSON list of strings")
     return frozenset(data)
+
+
+def _access_list(
+    raw: str | None, admins: frozenset[str]
+) -> tuple[re.Pattern[str], ...] | None:
+    """Email regexes allowed to use the service, plus every admin address.
+
+    ``None`` (unset or empty) means everyone is allowed. Patterns must match the
+    whole address, ignoring case.
+    """
+
+    if raw is None or not raw.strip():
+        return None
+    message = "ACCESS_LIST must be a JSON list of regular expressions"
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise ValueError(message) from error
+    if not isinstance(data, list) or not all(isinstance(item, str) for item in data):
+        raise ValueError(message)
+    sources = [*data, *(re.escape(email) for email in sorted(admins))]
+    try:
+        return tuple(re.compile(source, re.IGNORECASE) for source in sources)
+    except re.error as error:
+        raise ValueError(f"ACCESS_LIST has an invalid regular expression: {error}") from error

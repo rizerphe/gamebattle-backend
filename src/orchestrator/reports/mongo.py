@@ -79,6 +79,12 @@ class MongoReports:
         docs = await cursor.sort("timestamp", ASCENDING).to_list()
         return [_load(doc, sessions[doc["_id"]]) for doc in docs]
 
+    async def all(self) -> list[Report]:
+        docs = await self._reports.find().sort("timestamp", ASCENDING).to_list()
+        sessions = await self._sessions.get_many(doc["_id"] for doc in docs)
+        return [_load(doc, sessions[doc["_id"]]) for doc in docs if doc["_id"] in sessions]
+
+
 def _load(doc: dict[str, Any], session: Session) -> Report:
     return Report(
         session=session,
