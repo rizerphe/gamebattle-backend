@@ -33,16 +33,11 @@ class Notifier:
         self._tasks: set[asyncio.Task[None]] = set()
 
     async def report_filed(self, game: UUID, count: int) -> None:
-        """Tell the webhooks that asked about this report: the first one, or the count reached.
-
-        A webhook that matches both on a first report is told once.
-        """
+        """Tell the webhooks that asked about this report: the first one, or the count reached."""
 
         hooks = await self._hooks.all()
-        first = [hook for hook in hooks if count == 1 and hook.on_first_report]
-        reached = [
-            hook for hook in hooks if hook.threshold == count and hook not in first
-        ]
+        first = [h for h in hooks if h.event == "first_report" and count == 1]
+        reached = [h for h in hooks if h.event == "threshold" and h.threshold == count]
         if first:
             body = await self._embed(
                 game, "First report", "The published version was reported for the first time.", _YELLOW, count
@@ -57,7 +52,7 @@ class Notifier:
     async def game_removed(self, game: UUID, count: int) -> None:
         """Tell every webhook that asked about games taken down by reports."""
 
-        hooks = [hook for hook in await self._hooks.all() if hook.on_removed]
+        hooks = [hook for hook in await self._hooks.all() if hook.event == "removed"]
         if not hooks:
             return
         description = f"Taken down automatically after {count} reports."

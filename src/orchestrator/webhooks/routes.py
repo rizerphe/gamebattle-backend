@@ -11,7 +11,7 @@ from fastapi.responses import Response
 from orchestrator.auth import AdminRequired
 from orchestrator.dependencies import NotifierDep, StoreDep
 from orchestrator.reports.mongo import REPORTS_BEFORE_UNPUBLISH
-from orchestrator.webhooks.models import Webhook
+from orchestrator.webhooks.models import Event, Webhook
 from orchestrator.webhooks.mongo import MongoWebhooks
 
 router = APIRouter()
@@ -22,9 +22,8 @@ _MAX_URL_LENGTH = 2000
 @dataclass(frozen=True)
 class WebhookBody:
     url: str
-    on_first_report: bool = False
+    event: Event
     threshold: int | None = None
-    on_removed: bool = False
 
 
 @router.get("/webhooks")
@@ -36,7 +35,7 @@ async def list_webhooks(store: StoreDep, _admin: AdminRequired) -> list[Webhook]
 async def create_webhook(body: WebhookBody, store: StoreDep, _admin: AdminRequired) -> Webhook:
     url = _checked(body)
     return await MongoWebhooks(store.db).create(
-        url, body.on_first_report, body.threshold, body.on_removed
+        url, body.event, _threshold(body)
     )
 
 
@@ -46,7 +45,7 @@ async def replace_webhook(
 ) -> Webhook:
     url = _checked(body)
     hook = await MongoWebhooks(store.db).replace(
-        webhook_id, url, body.on_first_report, body.threshold, body.on_removed
+        webhook_id, url, body.event, _threshold(body)
     )
     if hook is None:
         raise HTTPException(404, "webhook not found")
@@ -81,8 +80,14 @@ def _checked(body: WebhookBody) -> str:
     parsed = urlparse(url)
     if len(url) > _MAX_URL_LENGTH or parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise HTTPException(400, "invalid webhook url")
-    if body.threshold is not None and not 1 <= body.threshold <= REPORTS_BEFORE_UNPUBLISH:
-        raise HTTPException(400, "invalid report threshold")
-    if not (body.on_first_report or body.on_removed or body.threshold is not None):
-        raise HTTPException(400, "webhook needs at least one notification")
     return url
+
+
+def _threshold(body: WebhookBody) -> int | None:
+    """The report count, only for the event that uses one."""
+
+    if body.event != "threshold":
+        return None
+    if body.threshold is None or not 1 <= body.threshold <= REPORTS_BEFORE_UNPUBLISH:
+        raise HTTPException(400, "invalid report threshold")
+    return body.threshold
