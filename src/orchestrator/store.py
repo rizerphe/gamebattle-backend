@@ -4,6 +4,7 @@ Each player has one ``GameFiles`` history, stored in MongoDB. Launching a
 snapshot is ``Sessions``' job; this only resolves players, games, and snapshots.
 """
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -96,19 +97,27 @@ class Store:
         )
         return Game(id=player.id, name=name)
 
-    async def published_games(self) -> list[tuple[UUID, Snapshot]]:
-        """Published snapshots that have an entrypoint, in player-id order."""
+    async def published_game_ids(self, exclude: Collection[UUID] = ()) -> list[UUID]:
+        """Games with a published snapshot, in id order, minus ``exclude``.
+
+        One query. Whether the snapshot can run is ``runnable_snapshot``'s job.
+        """
 
         documents = await self.db.players.find(
-            {"published": {"$exists": True, "$ne": None}}
+            {
+                "_id": {"$nin": list(exclude)},
+                "published": {"$exists": True, "$ne": None},
+            },
+            {"_id": 1},
         ).to_list()
-        found = []
-        for document in documents:
-            game_id = document["_id"]
-            try:
-                snapshot = await self.published(game_id)
-                entrypoint(snapshot)
-            except (Missing, NoEntrypoint):
-                continue
-            found.append((game_id, snapshot))
-        return sorted(found, key=lambda item: item[0])
+        return sorted(document["_id"] for document in documents)
+
+    async def runnable_snapshot(self, game_id: UUID) -> Snapshot | None:
+        """The published snapshot, or None when it is gone or has no entrypoint."""
+
+        try:
+            snapshot = await self.published(game_id)
+            entrypoint(snapshot)
+        except (Missing, NoEntrypoint):
+            return None
+        return snapshot

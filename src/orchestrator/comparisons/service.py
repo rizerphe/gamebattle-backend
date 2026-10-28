@@ -83,16 +83,23 @@ class Comparisons:
         existing = await self.records.open_for(player.id)
         if existing is not None:
             return await self.observe(existing), False
-        candidates = await self._candidates(player.id, exclude=set(), minimum=2)
-        if len(candidates) < 2:
-            raise Unavailable("no games to compare")
-        left, right = choose_pair(candidates, self.rng)
-        first = await self.sessions.launch(
-            owner, left.id, await self.store.published(left.id), "comparison"
-        )
-        second = await self.sessions.launch(
-            owner, right.id, await self.store.published(right.id), "comparison"
-        )
+        broken: set[UUID] = set()
+        while True:
+            candidates = await self._candidates(player.id, exclude=broken, minimum=2)
+            if len(candidates) < 2:
+                raise Unavailable("no games to compare")
+            left, right = choose_pair(candidates, self.rng)
+            snapshots = await asyncio.gather(
+                self.store.runnable_snapshot(left.id),
+                self.store.runnable_snapshot(right.id),
+            )
+            if all(snapshots):
+                break
+            broken.update(
+                game.id for game, snapshot in zip((left, right), snapshots) if snapshot is None
+            )
+        first = await self.sessions.launch(owner, left.id, snapshots[0], "comparison")
+        second = await self.sessions.launch(owner, right.id, snapshots[1], "comparison")
         comparison = Comparison(
             id=uuid4(),
             player=player.id,
@@ -417,23 +424,25 @@ class Comparisons:
     async def _pool(
         self, player: UUID, exclude: set[UUID], seen: set[UUID]
     ) -> list[RatedGame]:
-        blocked = seen | exclude | {player}
-        chosen = []
-        for game_id, _snapshot in await self.store.published_games():
-            if game_id in blocked:
-                continue
-            elo, plays = await self.ratings.get(game_id)
-            chosen.append(RatedGame(game_id, elo, plays))
-        return chosen
+        ids = await self.store.published_game_ids(seen | exclude | {player})
+        table = await self.ratings.all_plays()
+        return [RatedGame(game_id, *table.get(game_id, (INITIAL_ELO, 0))) for game_id in ids]
 
     async def _replacement(
         self, player: UUID, other: UUID, reported: UUID
     ) -> RatedGame | None:
         elo, plays = await self.ratings.get(other)
-        candidates = await self._candidates(player, exclude={other, reported}, minimum=1)
-        if not candidates:
-            return None
-        return choose_opponent(RatedGame(other, elo, plays), candidates, self.rng)
+        broken: set[UUID] = set()
+        while True:
+            candidates = await self._candidates(
+                player, exclude={other, reported} | broken, minimum=1
+            )
+            if not candidates:
+                return None
+            chosen = choose_opponent(RatedGame(other, elo, plays), candidates, self.rng)
+            if await self.store.runnable_snapshot(chosen.id) is not None:
+                return chosen
+            broken.add(chosen.id)
 
     async def _session(self, session_id: UUID) -> Session:
         return await self.sessions.get(session_id)
