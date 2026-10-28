@@ -36,7 +36,7 @@ class LlmClient:
         *,
         effort: Effort,
         schema: dict[str, Any] | None = None,
-        max_tokens: int = 2048,
+        max_tokens: int = 8192,
         timeout: float = 10.0,
     ) -> str:
         """The assistant's reply text. ``schema`` asks for a strict JSON object."""
@@ -62,9 +62,14 @@ class LlmClient:
             logger.warning("llm answered %s: %s", response.status_code, response.text[:300])
             raise LlmError(f"provider answered {response.status_code}")
         try:
-            content = response.json()["choices"][0]["message"]["content"]
+            choice = response.json()["choices"][0]
         except (ValueError, KeyError, IndexError, TypeError) as error:
+            logger.warning("llm reply has no choices: %s", response.text[:500])
             raise LlmError("unexpected response shape") from error
+        content = choice.get("message", {}).get("content") if isinstance(choice, dict) else None
         if not isinstance(content, str) or not content.strip():
-            raise LlmError("empty response")
+            # Reasoning tokens count towards the limit, so a long think can leave no answer.
+            reason = choice.get("finish_reason") if isinstance(choice, dict) else None
+            logger.warning("llm gave no answer (finish_reason=%s): %s", reason, response.text[:500])
+            raise LlmError(f"no answer (finish_reason={reason})")
         return content.strip()
