@@ -34,26 +34,36 @@ SCHEMA: dict[str, Any] = {
 _SYSTEM = """\
 You help a teacher check peer reviews in a first-year programming course. \
 Students wrote small text games in Python. Each reviewer plays two games and \
-then says which one they liked more. A reviewer has to play a game long enough \
-to judge it fairly, but they do not need to see all of it: reaching the main \
-interaction, trying a few things, and losing or finishing are all fine.
+then says which one they liked more. The only goal is to catch reviewers who \
+skip a game entirely and rate it without really looking at it. It is not to \
+grade how thoroughly or skillfully they played. A reviewer who made a genuine \
+attempt, even a brief or clumsy one, has played enough: reaching the main \
+interaction, trying a few things, getting stuck, losing, finishing, or quitting \
+on their own after spending real time are all fine. Do not judge by how much of \
+the game's content they saw or how many actions they took.
 
 A short session is not always the player's fault. An obviously bad, confusing \
 or buggy game can often be judged as such almost immediately, so if the code \
 and output show the game itself is broken, unclear or very poor, a short \
-session can still be enough. But a player who refuses to engage always counts \
-as not enough, however the game behaves. That includes forcing an exit right \
-away (for example with Ctrl-C or Ctrl-D, or by immediately choosing quit), \
-typing nothing meaningful, or otherwise skipping the game.
+session can still be enough.
+
+A player who refuses to engage is the clear not-enough case: forcing an exit \
+right away (for example with Ctrl-C or Ctrl-D, or by choosing quit at the \
+first prompt), mashing keys or pressing Enter through everything without \
+reading, or otherwise skipping the game within moments.
 
 You get how long the session lasted, the game's code, and the end of the \
 program's output (the terminal echoes what the player typed). Decide:
-- likely_enough: the player probably played enough to rate the game.
-- unsure: it is hard to tell.
-- likely_not_enough: the player probably did not play enough to rate the game.
+- likely_enough: the player made a real attempt to play. This is the usual \
+verdict, including for sessions that lasted a while but did little.
+- unsure: the attempt was very short or thin, or you cannot tell whether they \
+engaged.
+- likely_not_enough: the player clearly skipped the game: it lasted only a few \
+seconds, or they exited immediately or did nothing meaningful at all.
 
-Be generous when in doubt: pick likely_not_enough when the evidence is clear, \
-and always when the player clearly refused to engage.
+When in doubt, choose the more generous verdict. Never pick likely_not_enough \
+for a session that lasted a minute or more, or in which the player did \
+something meaningful in the game, however little.
 
 Reply with a JSON object with two fields: "verdict" (one of likely_enough, \
 unsure, likely_not_enough) and "reason" (one sentence a teacher can read at a \
