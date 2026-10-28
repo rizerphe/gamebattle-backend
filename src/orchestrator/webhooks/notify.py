@@ -32,15 +32,67 @@ class Notifier:
         self._hooks = MongoWebhooks(store.db)
         self._tasks: set[asyncio.Task[None]] = set()
 
-    async def report_filed(self, game: UUID, players: int, new_player: bool) -> None:
+    async def report_filed(
+        self,
+        game: UUID,
+        players: int,
+        new_player: bool,
+        credible_players: int,
+        credible: bool,
+        new_credible_player: bool,
+    ) -> None:
         """Tell the webhooks that asked about this report.
 
         ``players`` is how many different players have reported the published
-        version. The first report and the count reached only happen when a new
-        player reports; every report is sent regardless.
+        version, ``credible_players`` how many of them have a report that counts
+        (judged credible by the model, or not judged at all). The first report
+        and the count reached only happen when a new player reports; every
+        report is sent regardless. The credible events are only for a report
+        that counts.
         """
 
         hooks = await self._hooks.all()
+        if credible:
+            every_credible = [h for h in hooks if h.event == "every_credible"]
+            first_credible = [
+                h
+                for h in hooks
+                if h.event == "first_credible" and new_credible_player and credible_players == 1
+            ]
+            credible_reached = [
+                h
+                for h in hooks
+                if h.event == "credible_threshold"
+                and new_credible_player
+                and h.threshold == credible_players
+            ]
+            if every_credible:
+                body = await self._embed(
+                    game,
+                    "Game reported",
+                    f"Credible reports from {_players(credible_players)} so far.",
+                    _YELLOW,
+                    credible_players,
+                )
+                self._send(every_credible, body)
+            if first_credible:
+                body = await self._embed(
+                    game,
+                    "First credible report",
+                    "The published version got its first credible report.",
+                    _YELLOW,
+                    credible_players,
+                )
+                self._send(first_credible, body)
+            if credible_reached:
+                body = await self._embed(
+                    game,
+                    f"{credible_players} credible reports reached",
+                    f"Credible reports from {_players(credible_players)}.",
+                    _YELLOW,
+                    credible_players,
+                )
+                self._send(credible_reached, body)
         every = [h for h in hooks if h.event == "every_report"]
         first = [h for h in hooks if h.event == "first_report" and new_player and players == 1]
         reached = [

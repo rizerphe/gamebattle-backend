@@ -86,7 +86,7 @@ def _checked(body: WebhookBody) -> str:
 def _threshold(body: WebhookBody) -> int | None:
     """The report count, only for the event that uses one."""
 
-    if body.event != "threshold":
+    if body.event not in ("threshold", "credible_threshold"):
         return None
     if body.threshold is None or not 1 <= body.threshold <= REPORTS_BEFORE_UNPUBLISH:
         raise HTTPException(400, "invalid report threshold")

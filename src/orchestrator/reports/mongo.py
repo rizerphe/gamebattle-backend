@@ -6,9 +6,11 @@ Queries by game go through ``sessions``. Documents written before reports had
 their own id used the session id as ``_id`` and have no ``session`` field.
 """
 
+import asyncio
 import logging
 import time
 from collections.abc import Iterable
+from dataclasses import replace
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -16,7 +18,8 @@ from pymongo import ASCENDING
 from pymongo.asynchronous.database import AsyncDatabase
 
 from orchestrator.files.mongo import MongoGameFiles
-from orchestrator.reports.models import Report, ReportReason
+from orchestrator.reports.credibility import ReportAssessor
+from orchestrator.reports.models import Credibility, Report, ReportReason, counts
 from orchestrator.sessions.models import Session
 from orchestrator.sessions.mongo import MongoSessions
 from orchestrator.webhooks.notify import Notifier
@@ -26,32 +29,65 @@ logger = logging.getLogger("orchestrator")
 # A published snapshot stays in rotation until this many different players report it.
 REPORTS_BEFORE_UNPUBLISH = 5
 
+# Assessments run after the report is answered; this keeps them from being collected early.
+_running: set[asyncio.Task[None]] = set()
+
 
 class MongoReports:
-    def __init__(self, db: AsyncDatabase, notifier: Notifier | None = None) -> None:
+    def __init__(
+        self,
+        db: AsyncDatabase,
+        notifier: Notifier | None = None,
+        assessor: ReportAssessor | None = None,
+    ) -> None:
         self._reports = db.reports
         self._sessions = MongoSessions(db)
         self._notifier = notifier
+        self._assessor = assessor
 
     async def file(
         self, session: Session, short_reason: ReportReason, reason: str
     ) -> Report:
-        """Report a session. Every call stores a new report."""
+        """Report a session. Every call stores a new report.
 
-        doc = {
+        With an assessor the report is stored as pending and returned at once;
+        the assessment, the count, and the notifications follow in the background.
+        """
+
+        doc: dict[str, Any] = {
             "_id": uuid4(),
             "session": session.id,
             "short_reason": short_reason.value,
             "reason": reason,
             "timestamp": time.time(),
         }
+        if self._assessor is not None:
+            doc["credibility"] = {"status": "pending"}
         await self._reports.insert_one(doc)
         report = _load(doc, session)
-        await self._after_filed(report)
+        if self._assessor is None:
+            await self._after_filed(report)
+        else:
+            task = asyncio.create_task(self._assess_and_finish(self._assessor, report))
+            _running.add(task)
+            task.add_done_callback(_running.discard)
         return report
 
+    async def _assess_and_finish(self, assessor: ReportAssessor, report: Report) -> None:
+        try:
+            credibility = await assessor.assess(report)
+            await self._reports.update_one(
+                {"_id": report.id}, {"$set": {"credibility": _dump_credibility(credibility)}}
+            )
+            await self._after_filed(replace(report, credibility=credibility))
+        except Exception:
+            logger.exception("could not finish report %s", report.id)
+
     async def _after_filed(self, report: Report) -> None:
-        """Count the report against the current publication, take the game down at the limit, notify."""
+        """Count the report against the current publication, take the game down at the limit, notify.
+
+        Only reports that count (see ``counts``) bring a game closer to removal.
+        """
 
         session = report.session
         files = MongoGameFiles(self._reports.database, session.game)
@@ -61,38 +97,42 @@ class MongoReports:
         published, published_at = publication
         if published != session.game_revision:
             return
-        reporters = await self._reporters_since(session.game, published, published_at)
-        count = len(reporters)
-        if count >= REPORTS_BEFORE_UNPUBLISH:
+        current = await self._current(session.game, published, published_at)
+        others = [other for other in current if other.id != report.id]
+        reporters = {other.session.player for other in current}
+        credible = {other.session.player for other in current if counts(other)}
+        if len(credible) >= REPORTS_BEFORE_UNPUBLISH:
             await files.unpublish()
         if self._notifier is None:
             return
         # Another report from a player already counted does not change the count.
-        new_player = session.player not in await self._reporters_since(
-            session.game, published, published_at, excluding=report
-        )
+        new_player = session.player not in {other.session.player for other in others}
+        new_credible = counts(report) and session.player not in {
+            other.session.player for other in others if counts(other)
+        }
         try:
-            await self._notifier.report_filed(session.game, count, new_player)
-            if count >= REPORTS_BEFORE_UNPUBLISH:
-                await self._notifier.game_removed(session.game, count)
+            await self._notifier.report_filed(
+                session.game,
+                len(reporters),
+                new_player,
+                len(credible),
+                counts(report),
+                new_credible,
+            )
+            if len(credible) >= REPORTS_BEFORE_UNPUBLISH:
+                await self._notifier.game_removed(session.game, len(credible))
         except Exception:
             # The report is stored and the game is down; a notification must not undo that.
             logger.exception("could not notify webhooks")
 
-    async def _reporters_since(
-        self,
-        game: UUID,
-        revision: UUID,
-        since: float,
-        excluding: Report | None = None,
-    ) -> set[UUID]:
-        return {
-            other.session.player
+    async def _current(self, game: UUID, revision: UUID, since: float) -> list[Report]:
+        """Reports of the published revision filed since it was published."""
+
+        return [
+            other
             for other in await self.for_game(game)
-            if other.session.game_revision == revision
-            and other.timestamp >= since
-            and (excluding is None or other.id != excluding.id)
-        }
+            if other.session.game_revision == revision and other.timestamp >= since
+        ]
 
     async def for_session(self, session: Session) -> list[Report]:
         docs = await self._find([session.id])
@@ -131,6 +171,28 @@ def _session_id(doc: dict[str, Any]) -> UUID:
     return doc.get("session", doc["_id"])
 
 
+def _dump_credibility(credibility: Credibility) -> dict[str, Any]:
+    return {
+        "status": credibility.status,
+        "credible": credibility.credible,
+        "reason": credibility.reason,
+        "model": credibility.model,
+        "evaluated_at": credibility.evaluated_at,
+    }
+
+
+def _load_credibility(doc: dict[str, Any] | None) -> Credibility | None:
+    if doc is None:
+        return None
+    return Credibility(
+        status=doc["status"],
+        credible=doc.get("credible"),
+        reason=doc.get("reason"),
+        model=doc.get("model"),
+        evaluated_at=doc.get("evaluated_at"),
+    )
+
+
 def _load(doc: dict[str, Any], session: Session) -> Report:
     return Report(
         id=doc["_id"],
@@ -138,4 +200,5 @@ def _load(doc: dict[str, Any], session: Session) -> Report:
         short_reason=ReportReason(doc["short_reason"]),
         reason=doc["reason"],
         timestamp=doc["timestamp"],
+        credibility=_load_credibility(doc.get("credibility")),
     )

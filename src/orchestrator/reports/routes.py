@@ -12,7 +12,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query
 
 from orchestrator.auth import AdminRequired, CallerDep, Owner
-from orchestrator.dependencies import NotifierDep, SessionsDep, StoreDep
+from orchestrator.dependencies import AssessorDep, NotifierDep, SessionsDep, StoreDep
 from orchestrator.reports.enrich import enrich_reports
 from orchestrator.reports.models import FiledReport, Report, ReportReason
 from orchestrator.reports.mongo import MongoReports
@@ -40,6 +40,7 @@ async def file_report(
     store: StoreDep,
     sessions: SessionsDep,
     notifier: NotifierDep,
+    assessor: AssessorDep,
     owner: Owner,
 ) -> FiledReport:
     session = await _session(sessions, owner, session_id)
@@ -48,7 +49,9 @@ async def file_report(
     reason = body.reason.strip()
     if len(reason) > _MAX_REASON_LENGTH:
         raise HTTPException(400, "invalid report reason")
-    report = await MongoReports(store.db, notifier).file(session, body.short_reason, reason)
+    report = await MongoReports(store.db, notifier, assessor).file(
+        session, body.short_reason, reason
+    )
     if not body.keep_playing:
         try:
             await sessions.stop(session.id, "reported")

@@ -31,6 +31,7 @@ from orchestrator.comparisons.pairing import (
 )
 from orchestrator.fairness.service import FairnessChecks
 from orchestrator.fairness.verdicts import side_counts, side_is_flagged
+from orchestrator.reports.credibility import ReportAssessor
 from orchestrator.reports.models import ReportReason
 from orchestrator.reports.mongo import MongoReports
 from orchestrator.sessions.models import Session
@@ -66,12 +67,13 @@ class Comparisons:
         rng: random.Random | None = None,
         notifier: Notifier | None = None,
         fairness: FairnessChecks | None = None,
+        assessor: ReportAssessor | None = None,
     ):
         self.store = store
         self.sessions = sessions
         self.records = MongoComparisons(store.db)
         self.ratings = MongoRatings(store.db)
-        self.reports = MongoReports(store.db, notifier)
+        self.reports = MongoReports(store.db, notifier, assessor)
         self.rng = rng or random.Random()
         self.fairness = fairness
         self._rebuild_lock = asyncio.Lock()

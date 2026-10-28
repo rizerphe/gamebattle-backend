@@ -25,6 +25,7 @@ from orchestrator.llm import LlmClient
 from orchestrator.phases.routes import router as phases_router
 from orchestrator.phases.sweep import sweep_forever
 from orchestrator.players.routes import router as players_router
+from orchestrator.reports.credibility import ReportAssessor
 from orchestrator.reports.routes import router as reports_router
 from orchestrator.sessions.mongo import create_indexes as create_session_indexes
 from orchestrator.sessions.routes import router as sessions_router
@@ -95,11 +96,13 @@ def create_app() -> FastAPI:
             app.state.summaries = Summaries(llm)
             ui_url = next((o for o in config.cors_origins if o != "*"), None)
             app.state.notifier = Notifier(store, http, ui_url)
+            app.state.assessor = ReportAssessor(store, terminals, llm) if llm else None
             app.state.comparisons = Comparisons(
                 store,
                 app.state.sessions,
                 notifier=app.state.notifier,
                 fairness=FairnessChecks(store, terminals, llm),
+                assessor=app.state.assessor,
             )
             app.state.stats = StatsService(db, app.state.comparisons)
             app.state.users = FirebaseUsers(
