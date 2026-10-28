@@ -82,17 +82,29 @@ MAX_FILES = 64
 
 
 def valid_path(path: str) -> bool:
-    """Relative ASCII path, the same rule the editor enforces."""
+    """Relative printable-ASCII path, the same rule the editor enforces.
+
+    Spaces are fine inside a name. A name that can start a game is stricter,
+    see ``can_launch``.
+    """
 
     parts = path.split("/")
     return bool(
         path
         and path.isascii()
-        and " " not in path
+        and path.isprintable()
         and not path.startswith("/")
         and "\\" not in path
-        and all(part not in ("", ".", "..") for part in parts)
+        and all(
+            part not in ("", ".", "..") and part == part.strip(" ") for part in parts
+        )
     )
+
+
+def can_launch(path: str) -> bool:
+    """Whether a file can be a game's entrypoint: a ``.py`` file with no space in its path."""
+
+    return path.endswith(".py") and " " not in path
 
 
 class RevisionConflict(Exception):
@@ -122,12 +134,16 @@ def saved_files(snapshot: Snapshot) -> list[tuple[str, bytes]]:
 
 
 def entrypoint(snapshot: Snapshot) -> str:
-    """``main.py`` when present, otherwise the only ``.py`` file."""
+    """``main.py`` when present, otherwise the only launchable ``.py`` file.
+
+    A ``.py`` file with a space in its path is never launched, but it may
+    still be imported or read by the game.
+    """
 
     paths = [file.path for file in snapshot.files if file.saved_content is not None]
     if "main.py" in paths:
         return "main.py"
-    python = [path for path in paths if path.endswith(".py")]
+    python = [path for path in paths if can_launch(path)]
     if len(python) == 1:
         return python[0]
     raise NoEntrypoint

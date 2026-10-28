@@ -61,15 +61,29 @@ player typed). Categories:
 
 A report is credible when it describes a genuine problem with the game that a \
 fair player could run into: a traceback or crash, a dead end or soft-lock, \
-prompts that really are confusing, behaviour that contradicts what the game \
-says. It does not have to be proven. If the code or output supports it, or it \
-is plausible given them, it is credible.
+controls or goals the game never explains, behaviour that contradicts what the \
+game says. It does not have to be proven. If the code or output supports it, or \
+it is plausible given them, it is credible. The text is optional, and the \
+category alone is a real report: never count a missing or short text against \
+it.
 
-A report is not credible when the evidence contradicts it (the game ran \
-normally and the reviewer left before it could show a problem), when it is a \
-joke or spite, when its text is empty or nonsense with nothing in the code or \
-output behind it, or when it is only a matter of taste (boring, too hard, not \
-to their liking) and not a problem with the game working.
+Judge "unclear" and "other" reports by the code, not by the absence of errors. \
+Read how the game takes input and check whether a player is ever told what to \
+do: are the keys or commands it reacts to shown on screen, in a menu, or in \
+instructions the player would actually see? If the game relies on controls, \
+commands, or rules that are never shown (for example movement keys that no \
+screen mentions), a player really could not have worked it out, so the report \
+is credible even though the output looks normal and nothing crashed. A screen \
+that just sits on a menu or keeps redrawing is exactly what a confused player \
+sees. The output is only the last part of the session and often shows nothing \
+about what the player tried, so do not treat "no error in the output" as \
+evidence against the report.
+
+A report is not credible only when the evidence clearly contradicts it (the \
+game plainly explains what to do and works, and the reviewer left before they \
+could have read it, within a few seconds), when it is a joke or spite, or when \
+it is only a matter of taste (boring, too hard, not to their liking) with no \
+problem in how the game explains or does its job.
 
 When the evidence is genuinely ambiguous, lean credible.
 
